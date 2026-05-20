@@ -1,4 +1,4 @@
-# Kamori
+# Kamori Community Edition
 
 **Self-hosted log ingestion with an AI-queryable MCP interface.**
 
@@ -633,4 +633,4 @@ Starts the server and opens a tunnel on `https://kamori-ingest.loca.lt`. Useful 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, running tests, PR guidelines
 - [SECURITY.md](SECURITY.md) — how to report vulnerabilities
 - [LICENSE](LICENSE) — MIT (SDK + scaffolder) / Elastic License 2.0 (server + MCP)
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues, capacity notes, performance tuning
+- # [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues, capacity notes, performance tuning
