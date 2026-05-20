@@ -1,0 +1,32 @@
+{
+  "name": "@usekamori/sdk",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "Kamori SDK — drop-in console shim and logger integrations",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./client": "./dist/client.js",
+    "./pino": "./dist/pino.js",
+    "./winston": "./dist/winston.js",
+    "./browser": "./dist/browser.js",
+    "./next": "./dist/next.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usekamori/kamori",
+    "directory": "packages/sdk"
+  },
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,198 @@
+services:
+  # ── Kamori ────────────────────────────────────────────────────────────────
+  kamori:
+    build:
+      context: ..
+      dockerfile: packages/ingest/Dockerfile
+      provenance: false
+    ports:
+      - "3110:3110" # ingest + query API
+      - "3111:3111" # MCP HTTP
+    environment:
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      ALLOWED_ORIGINS: "*"
+    volumes:
+      - kamori-data:/app/data
+
+  # ── TypeScript services (use /sdk, built from kamori/ root) ──────
+
+  # SDK: installShim — Node.js console shim, zero code changes
+  express-api:
+    build:
+      context: ..
+      dockerfile: kamori-demo/express-api/Dockerfile
+      provenance: false
+    ports:
+      - "3200:4000"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      FASTAPI_URL: "http://fastapi-service:5000"
+      FLASK_URL: "http://flask-service:5001"
+      PHP_URL: "http://php-service:6100"
+      PINO_URL: "http://pino-service:3500"
+      WINSTON_URL: "http://winston-service:3501"
+      GO_SERVICE_URL: "http://go-service:7000"
+      PYTHON_SDK_URL: "http://python-sdk-service:5002"
+      PHP_MONOLOG_URL: "http://php-monolog-service:6001"
+    depends_on:
+      - kamori
+      - pino-service
+      - fastapi-service
+      - flask-service
+      - php-service
+      - winston-service
+      - go-service
+      - python-sdk-service
+      - php-monolog-service
+
+  # SDK: KamoriClient + scoped() — direct structured client
+  fastify-api:
+    build:
+      context: ..
+      dockerfile: kamori-demo/fastify-api/Dockerfile
+      provenance: false
+    ports:
+      - "3201:4001"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # SDK: withKamori middleware + KamoriClient (server) + browser+installErrorCapture (client)
+  next-app:
+    build:
+      context: ..
+      dockerfile: kamori-demo/next-app/Dockerfile
+      provenance: false
+    ports:
+      - "3000:3000"
+    environment:
+      KAMORI_URL: "http://kamori:3110" # server-side (Docker-internal)
+      NEXT_PUBLIC_KAMORI_URL: "http://localhost:3110" # browser-side (host-accessible)
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      EXPRESS_URL: "http://express-api:4000"
+      FASTIFY_URL: "http://fastify-api:4001"
+    depends_on:
+      - kamori
+
+  # SDK: pino + createKamoriStream — pino transport
+  pino-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/pino-service/Dockerfile
+      provenance: false
+    ports:
+      - "3500:3500"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # SDK: winston + KamoriTransport — winston transport
+  winston-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/winston-service/Dockerfile
+      provenance: false
+    ports:
+      - "3501:3501"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # ── Python services ───────────────────────────────────────────────────────
+
+  # Raw HTTP — reference pattern for any language without an SDK
+  fastapi-service:
+    build:
+      context: ./fastapi-service
+      provenance: false
+    ports:
+      - "3300:5000"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # Python SDK: python logging + KamoriHandler
+  flask-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/flask-service/Dockerfile
+      provenance: false
+    ports:
+      - "3301:5001"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # Python SDK: KamoriClient direct
+  python-sdk-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/python-sdk-service/Dockerfile
+      provenance: false
+    ports:
+      - "3302:5002"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # ── PHP services ──────────────────────────────────────────────────────────
+
+  # PHP SDK: KamoriClient direct
+  php-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/php-service/Dockerfile
+      provenance: false
+    ports:
+      - "3400:6100"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # PHP SDK: Monolog + KamoriHandler
+  php-monolog-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/php-monolog-service/Dockerfile
+      provenance: false
+    ports:
+      - "3401:6001"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+  # ── Go service ────────────────────────────────────────────────────────────
+
+  # Go SDK: KamoriClient + Scoped()
+  go-service:
+    build:
+      context: ..
+      dockerfile: kamori-demo/go-service/Dockerfile
+      provenance: false
+    ports:
+      - "3600:7000"
+    environment:
+      KAMORI_URL: "http://kamori:3110"
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+    depends_on:
+      - kamori
+
+volumes:
+  kamori-data:

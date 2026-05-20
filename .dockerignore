@@ -1,0 +1,28 @@
+node_modules
+**/node_modules
+dist
+data
+.env
+*.ndjson
+*.db
+.notes
+.claude
+HomebrewFormula
+
+# kamori-demo: include service source, exclude generated/installed artifacts
+kamori-demo/*/node_modules
+kamori-demo/*/.next
+kamori-demo/*/dist
+kamori-demo/*/.venv
+kamori-demo/*/vendor
+kamori-demo/**/__pycache__
+kamori-demo/**/*.pyc
+kamori-demo/*/.pytest_cache
+
+# sdks: include source, exclude installed artifacts
+sdks/python/.venv
+sdks/python/.pytest_cache
+sdks/python/**/__pycache__
+sdks/python/**/*.pyc
+sdks/php/vendor
+sdks/go/vendor

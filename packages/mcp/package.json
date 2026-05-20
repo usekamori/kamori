@@ -1,0 +1,37 @@
+{
+  "name": "@usekamori/mcp",
+  "version": "1.0.0",
+  "license": "Elastic-2.0",
+  "description": "Kamori MCP server — query logs from Claude and Cursor",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "dist/mcp.js",
+  "exports": {
+    ".": "./dist/mcp.js",
+    "./start-mcp": "./dist/start-mcp.js",
+    "./build-mcp-server": "./dist/build-mcp-server.js",
+    "./tools": "./dist/tools.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usekamori/kamori",
+    "directory": "packages/mcp"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node --enable-source-maps dist/mcp.js",
+    "start:stdio": "node --enable-source-maps dist/mcp.js --stdio"
+  },
+  "dependencies": {
+    "@usekamori/core": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "typescript": "^5.9.3"
+  }
+}

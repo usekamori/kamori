@@ -1,0 +1,16 @@
+{
+    "name": "kamori-io/demo-php-service",
+    "description": "Kamori demo — PHP payment service (KamoriClient SDK)",
+    "type": "project",
+    "require": {
+        "php": ">=8.3",
+        "usekamori/kamori-php": "@dev"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../sdks/php",
+            "options": { "symlink": false }
+        }
+    ]
+}

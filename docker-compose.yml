@@ -1,0 +1,46 @@
+services:
+  kamori:
+    build:
+      context: .
+      # dockerfile: packages/ingest/Dockerfile
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${PORT:-3110}:3110"
+      - "${MCP_PORT:-3111}:3111"
+      # Uncomment the lines below when SYSLOG_PORT is set (e.g. SYSLOG_PORT=514):
+      # - "${SYSLOG_PORT:-514}:${SYSLOG_PORT:-514}/udp"
+      # - "${SYSLOG_PORT:-514}:${SYSLOG_PORT:-514}/tcp"
+    volumes:
+      - data:/app/data
+    environment:
+      PORT: 3110
+      HOST: 0.0.0.0
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+      DB_PATH: /app/data/logs/ingress.db
+      BODY_LIMIT_BYTES: ${BODY_LIMIT_BYTES:-1000000}
+      MAX_ROWS: ${MAX_ROWS:-1000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      RETENTION_DAYS: ${RETENTION_DAYS:-0}
+      SYSLOG_PORT: ${SYSLOG_PORT:-0}
+      WEBHOOK_SECRET_VERCEL: ${WEBHOOK_SECRET_VERCEL:-}
+      WEBHOOK_SECRET_GITHUB: ${WEBHOOK_SECRET_GITHUB:-}
+      WEBHOOK_SECRET_RENDER: ${WEBHOOK_SECRET_RENDER:-}
+      MCP_PORT: 3111
+      MCP_TOKEN: ${MCP_TOKEN:-}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3110/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  data:

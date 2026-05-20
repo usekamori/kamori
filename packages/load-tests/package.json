@@ -1,0 +1,16 @@
+{
+  "name": "@usekamori/load-tests",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Elastic-2.0",
+  "description": "k6 load tests for Kamori ingress",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "k6:smoke": "k6 run scripts/ramp-ingest.js --env TEST_PROFILE=smoke",
+    "k6:stress": "k6 run scripts/ramp-ingest.js --env TEST_PROFILE=stress",
+    "k6:mixed": "k6 run scripts/mixed-under-load.js --env TEST_PROFILE=stress",
+    "k6:spike": "k6 run scripts/spike-recovery.js --env TEST_PROFILE=stress",
+    "k6:stress:all": "npm run k6:stress && npm run k6:mixed && npm run k6:spike"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "kamori-demo",
+  "private": true,
+  "scripts": {
+    "generate": "tsx load-gen.ts",
+    "generate:chaos": "tsx load-gen.ts --scenario chaos",
+    "tail": "curl -sN http://localhost:7000/v1/stream | jq -rc '\"\\(.ts[11:19]) [\\(.level)] \\(.service)  \\(.event // .message // \"\")\"'"
+  },
+  "devDependencies": {
+    "tsx": "*"
+  }
+}
