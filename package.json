@@ -1,6 +1,6 @@
 {
   "name": "kamori",
-  "private": true,
+  "private": false,
   "version": "1.0.0",
   "license": "Elastic-2.0",
   "description": "Kamori — self-hosted log ingestion and AI-queryable MCP interface",
