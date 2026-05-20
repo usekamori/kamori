@@ -1,0 +1,23 @@
+{
+  "name": "@usekamori/core",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Elastic-2.0",
+  "description": "Shared database and configuration for Kamori",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.3",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,27 @@
+name: Forward CI logs to Kamori
+
+# MKR-84: GitHub Action that forwards CI job logs to a Kamori instance.
+# Add to any workflow:
+#
+#   - uses: kamori-io/action@v1
+#     with:
+#       kamori-url: ${{ secrets.KAMORI_URL }}
+#       kamori-token: ${{ secrets.KAMORI_TOKEN }}
+
+on:
+  workflow_call:
+    inputs:
+      kamori-url:
+        description: "URL of your Kamori ingest server"
+        required: true
+        type: string
+      kamori-token:
+        description: "Auth token (INGEST_TOKEN) for your Kamori server"
+        required: false
+        type: string
+        default: ""
+      service:
+        description: "Service name to tag logs with (default: github-actions)"
+        required: false
+        type: string
+        default: "github-actions"

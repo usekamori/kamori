@@ -1,0 +1,191 @@
+# PR Checks — kamori (OSS)
+#
+# Runs exclusively on pull requests. Provides fast, focused feedback on
+# the change itself rather than a full CI run (which ci.yml handles).
+#
+# Jobs:
+#   validate-title  → enforces Conventional Commits format on the PR title
+#   build-check     → confirms the PR compiles cleanly and tests pass
+#   coverage-gate   → runs vitest --coverage and annotates the summary
+#   sdk-matrix      → runs all three SDK test suites in parallel
+
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+# Cancel earlier runs for the same PR when new commits are pushed.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. PR title validation
+  #    Enforces the Conventional Commits specification so the release
+  #    workflow can generate accurate changelogs from PR titles.
+  #
+  #    Accepted prefixes:
+  #      feat, fix, chore, docs, refactor, test, ci, perf, revert, build
+  #    Breaking changes: append ! before the colon  (e.g. feat!: ...)
+  # ---------------------------------------------------------------------------
+  validate-title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commits format
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            refactor
+            test
+            ci
+            perf
+            revert
+            build
+          # Allow scope in parentheses, e.g. feat(sdk): ...
+          requireScope: false
+
+  # ---------------------------------------------------------------------------
+  # 2. Build check
+  #    Verifies the PR compiles and all TypeScript types are valid.
+  #    Runs tsc --noEmit first (fast gate) then a full `npm run build`.
+  #    Failing here means the PR cannot land.
+  # ---------------------------------------------------------------------------
+  build-check:
+    name: Build check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fast type gate — exits on first type error without emitting JS.
+      - name: Type check
+        run: |
+          npx tsc --noEmit --project packages/core/tsconfig.json
+          npx tsc --noEmit --project packages/ingest/tsconfig.json
+          npx tsc --noEmit --project packages/mcp/tsconfig.json
+          npx tsc --noEmit --project packages/sdk/tsconfig.json
+
+      # Full compile to verify emit succeeds (no declaration errors, etc.).
+      - name: Build all packages
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 3. Coverage gate
+  #    Runs the full vitest suite with coverage and uploads the report as an
+  #    artifact. The thresholds in vitest.config.ts (80/70%) are enforced —
+  #    if coverage drops below the threshold the job fails and the PR is
+  #    blocked until coverage is restored.
+  # ---------------------------------------------------------------------------
+  coverage-gate:
+    name: Test & coverage
+    runs-on: ubuntu-latest
+    needs: build-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      # --coverage runs vitest with the v8 provider and writes reports to
+      # coverage/. The job fails if any threshold defined in vitest.config.ts
+      # is not met, blocking the PR merge.
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+
+      # The report is attached to the workflow run so reviewers can download
+      # the HTML version and inspect uncovered lines.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-coverage-${{ github.event.pull_request.number }}
+          path: coverage/
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # 4. SDK matrix
+  #    Runs Go, Python, and PHP SDK tests in parallel so SDK regressions are
+  #    caught before merge. Each job is independent — one failure does not
+  #    cancel the others (`fail-fast: false`).
+  # ---------------------------------------------------------------------------
+  sdk-matrix:
+    name: SDK — ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Go
+            setup: go
+            go-version: "1.22"
+          - name: Python
+            setup: python
+            python-version: "3.11"
+          - name: PHP
+            setup: php
+            php-version: "8.2"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Go ---
+      - uses: actions/setup-go@v5
+        if: matrix.setup == 'go'
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: sdks/go/go.sum
+
+      - name: Go — test & vet
+        if: matrix.setup == 'go'
+        working-directory: sdks/go
+        run: go test ./... && go vet ./...
+
+      # --- Python ---
+      - uses: actions/setup-python@v5
+        if: matrix.setup == 'python'
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: sdks/python/pyproject.toml
+
+      - name: Python — install & test
+        if: matrix.setup == 'python'
+        working-directory: sdks/python
+        run: pip install -e ".[dev]" && python -m pytest
+
+      # --- PHP ---
+      - uses: shivammathur/setup-php@v2
+        if: matrix.setup == 'php'
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: PHP — install & test
+        if: matrix.setup == 'php'
+        working-directory: sdks/php
+        run: composer install --no-progress --prefer-dist && vendor/bin/phpunit

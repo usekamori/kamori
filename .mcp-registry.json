@@ -1,0 +1,81 @@
+{
+  "$schema": "https://registry.mcp.so/schema/v1.json",
+  "name": "kamori",
+  "displayName": "Kamori — Self-hosted Log Ingest",
+  "description": "Query and tail logs from your self-hosted Kamori ingest server. Search across all services, set threshold alerts, and live-tail log streams directly in Claude Code or Cursor.",
+  "version": "1.0.0",
+  "author": "usekamori",
+  "license": "MIT",
+  "homepage": "https://github.com/usekamori/kamori",
+  "repository": "https://github.com/usekamori/kamori",
+  "categories": ["observability", "logging", "monitoring"],
+  "keywords": [
+    "logs",
+    "logging",
+    "ingest",
+    "sqlite",
+    "self-hosted",
+    "observability"
+  ],
+  "transports": [
+    {
+      "type": "stdio",
+      "command": "node",
+      "args": ["packages/mcp/dist/mcp.js"],
+      "description": "stdio transport — Claude Code / Cursor spawn this directly"
+    },
+    {
+      "type": "sse",
+      "url": "http://localhost:3111/sse",
+      "description": "HTTP/SSE transport — run with --http flag for Docker / remote"
+    }
+  ],
+  "tools": [
+    {
+      "name": "query_logs",
+      "description": "Fetch log entries with optional filters (service, level, time range)"
+    },
+    {
+      "name": "search_logs",
+      "description": "Full-text search across all log bodies using SQLite FTS5"
+    },
+    {
+      "name": "tail_logs",
+      "description": "Fetch log entries newer than a given id — ideal for live tailing"
+    },
+    {
+      "name": "watch_logs",
+      "description": "Long-poll for new log entries — blocks until new logs arrive or timeout"
+    },
+    {
+      "name": "get_log",
+      "description": "Fetch a single log entry by its numeric id"
+    },
+    {
+      "name": "list_services",
+      "description": "List all distinct service names seen in the logs"
+    },
+    {
+      "name": "summarize_errors",
+      "description": "Count log entries grouped by service and level"
+    },
+    {
+      "name": "alert_summary",
+      "description": "Count matching log entries in the last N minutes — for threshold alerting"
+    },
+    {
+      "name": "anomaly_hint",
+      "description": "Compare recent error rate against 7-day baseline to surface anomalies"
+    }
+  ],
+  "installation": {
+    "npm": {
+      "package": "@usekamori/mcp",
+      "command": "npx @usekamori/mcp"
+    },
+    "docker": {
+      "image": "ghcr.io/usekamori/kamori",
+      "command": "docker run -p 3111:3111 -e MCP_TOKEN=your-token ghcr.io/usekamori/kamori node packages/mcp/dist/mcp.js --http"
+    }
+  }
+}

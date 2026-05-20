@@ -1,0 +1,289 @@
+# release.yml — Publish on version tag
+#
+# Triggered by pushing a semver tag (e.g. `git tag v1.2.3 && git push --tags`).
+# Pre-releases are detected automatically from the tag name: any tag containing
+# a hyphen (v1.0.0-rc.1, v2.0.0-beta.1) is marked as pre-release on GitHub.
+#
+# Pipeline (jobs run in parallel after tests pass):
+#
+#   test-ts        → TypeScript build + vitest + coverage
+#   test-sdks      → Go / Python / PHP in parallel (fail-fast: false)
+#   publish-npm    → @usekamori/sdk, @usekamori/mcp, @usekamori/ingest, kamori (CLI)
+#   publish-pypi   → kamori-sdk on PyPI
+#   publish-docker → multi-arch Docker image pushed to ghcr.io
+#   github-release → GitHub Release created with auto-generated changelog
+#
+# Registry authentication — all via OIDC, no long-lived tokens:
+#
+#   npm   — Trusted Publishers. One-time setup per package on npmjs.com:
+#             Package → Settings → Trusted Publishers → Add publisher
+#             → org: usekamori, repo: kamori, workflow: release.yml, environment: npm
+#
+#   PyPI  — Trusted Publishers. One-time setup on pypi.org:
+#             Account → Publishing → Add a new pending publisher
+#             → owner: usekamori, repo: kamori, workflow: release.yml, environment: pypi
+#
+#   Packagist — webhook-based, no CI publish step needed.
+#               One-time setup: submit https://github.com/usekamori/kamori to packagist.org,
+#               then add the GitHub webhook Packagist provides to the repo settings.
+#               Packagist re-indexes automatically on every tag push.
+#
+#   Go (pkg.go.dev) — fully automatic, no setup required.
+#               pkg.go.dev indexes sdks/go/ when the tag is pushed.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # create GitHub Release
+  packages: write   # push Docker image to GHCR
+  id-token: write   # OIDC for npm + PyPI provenance
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a release mid-flight
+
+jobs:
+  # =============================================================================
+  # 1. TypeScript — build & test
+  # =============================================================================
+  test-ts:
+    name: TypeScript — build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: TypeScript tests + coverage
+        run: npx vitest run --coverage
+
+  # =============================================================================
+  # 2. SDK tests — parallel matrix (Go / Python / PHP)
+  #    Mirrors the PR workflow's sdk-matrix for consistency.
+  # =============================================================================
+  test-sdks:
+    name: SDK — ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Go
+            setup: go
+            go-version: "1.22"
+          - name: Python
+            setup: python
+            python-version: "3.11"
+          - name: PHP
+            setup: php
+            php-version: "8.2"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: matrix.setup == 'go'
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: sdks/go/go.sum
+
+      - name: Go — test & vet
+        if: matrix.setup == 'go'
+        working-directory: sdks/go
+        run: go test ./... && go vet ./...
+
+      - uses: actions/setup-python@v5
+        if: matrix.setup == 'python'
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: sdks/python/pyproject.toml
+
+      - name: Python — install & test
+        if: matrix.setup == 'python'
+        working-directory: sdks/python
+        run: pip install -e ".[dev]" && python -m pytest
+
+      - uses: shivammathur/setup-php@v2
+        if: matrix.setup == 'php'
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: PHP — install & test
+        if: matrix.setup == 'php'
+        working-directory: sdks/php
+        run: composer install --no-progress --prefer-dist && vendor/bin/phpunit
+
+  # =============================================================================
+  # 3. NPM PUBLISH — OIDC Trusted Publishers (no NPM_TOKEN secret needed)
+  # =============================================================================
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [test-ts, test-sdks]
+    environment: npm   # must match the environment configured in the Trusted Publisher
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Publish @usekamori/sdk
+        run: npm publish --workspace=packages/sdk --access public --provenance
+
+      - name: Publish @usekamori/mcp
+        run: npm publish --workspace=packages/mcp --access public --provenance
+
+      - name: Publish @usekamori/ingest
+        run: npm publish --workspace=packages/ingest --access public --provenance
+
+      - name: Publish kamori (CLI scaffolder)
+        run: npm publish --workspace=packages/npx-kamori --access public --provenance
+
+  # =============================================================================
+  # 4. PYPI PUBLISH — OIDC Trusted Publishers (no PYPI_TOKEN secret needed)
+  # =============================================================================
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [test-ts, test-sdks]
+    environment: pypi   # must match the environment configured in the Trusted Publisher
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build distribution
+        working-directory: sdks/python
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdks/python/dist/
+
+  # =============================================================================
+  # 5. DOCKER PUBLISH
+  #    Builds a multi-arch image (amd64 + arm64) and pushes to GHCR.
+  #    Tags produced from v1.2.3: 1.2.3, 1.2, 1, latest
+  # =============================================================================
+  publish-docker:
+    name: Publish Docker image
+    runs-on: ubuntu-latest
+    needs: [test-ts, test-sdks]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/usekamori/kamori
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =============================================================================
+  # 6. GITHUB RELEASE + CHANGELOG
+  # =============================================================================
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [publish-npm, publish-pypi, publish-docker]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for accurate release notes
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## Install
+
+            ```bash
+            # Node.js SDK
+            npm install @usekamori/sdk
+
+            # Self-hosted ingest server
+            npx @usekamori/ingest
+
+            # npx scaffolder
+            npx kamori my-logs --yes
+
+            # Python SDK
+            pip install kamori-sdk
+
+            # PHP SDK
+            composer require usekamori/kamori-php
+
+            # Go SDK
+            go get github.com/usekamori/kamori-go
+
+            # Docker
+            docker pull ghcr.io/usekamori/kamori:${{ github.ref_name }}
+            ```

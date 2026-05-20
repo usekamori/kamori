@@ -1,0 +1,17 @@
+{
+    "name": "kamori-io/demo-php-monolog-service",
+    "description": "Kamori demo — PHP notification service (Monolog + KamoriHandler)",
+    "type": "project",
+    "require": {
+        "php": ">=8.3",
+        "monolog/monolog": "^3.0",
+        "usekamori/kamori-php": "@dev"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../sdks/php",
+            "options": { "symlink": false }
+        }
+    ]
+}

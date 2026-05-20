@@ -1,0 +1,55 @@
+name: "Kamori Log Forwarder"
+description: "Forward GitHub Actions job logs and workflow events to a self-hosted Kamori ingest server"
+author: "usekamori"
+
+branding:
+  icon: "activity"
+  color: "orange"
+
+inputs:
+  kamori-url:
+    description: "URL of your Kamori ingest server (e.g. https://kamori.example.com)"
+    required: true
+  kamori-token:
+    description: "Auth token (INGEST_TOKEN) configured on your Kamori server"
+    required: false
+    default: ""
+  service:
+    description: "Service name to tag all forwarded logs with"
+    required: false
+    default: "github-actions"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send workflow event to Kamori
+      shell: bash
+      env:
+        KAMORI_URL: ${{ inputs.kamori-url }}
+        KAMORI_TOKEN: ${{ inputs.kamori-token }}
+        SERVICE: ${{ inputs.service }}
+      run: |
+        TOKEN_HEADER=""
+        if [ -n "$KAMORI_TOKEN" ]; then
+          TOKEN_HEADER="-H \"Authorization: Bearer $KAMORI_TOKEN\""
+        fi
+
+        curl -sf \
+          -H "content-type: application/json" \
+          ${KAMORI_TOKEN:+-H "Authorization: Bearer $KAMORI_TOKEN"} \
+          -d "{
+            \"service\": \"$SERVICE\",
+            \"level\": \"info\",
+            \"workflow_event\": \"workflow_run\",
+            \"workflow\": \"$GITHUB_WORKFLOW\",
+            \"job\": \"$GITHUB_JOB\",
+            \"run_id\": \"$GITHUB_RUN_ID\",
+            \"run_number\": $GITHUB_RUN_NUMBER,
+            \"ref\": \"$GITHUB_REF\",
+            \"sha\": \"$GITHUB_SHA\",
+            \"actor\": \"$GITHUB_ACTOR\",
+            \"repository\": \"$GITHUB_REPOSITORY\",
+            \"trigger\": \"$GITHUB_EVENT_NAME\",
+            \"status\": \"running\"
+          }" \
+          "$KAMORI_URL/v1/ingest" || echo "Kamori: ingest failed (non-fatal)"
