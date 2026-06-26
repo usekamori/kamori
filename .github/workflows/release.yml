@@ -155,16 +155,27 @@ jobs:
         run: npm run build
 
       - name: Publish @usekamori/sdk
-        run: npm publish --workspace=packages/sdk --access public --provenance
+        run: |
+          VERSION=$(node -p "require('./packages/sdk/package.json').version")
+          npm view @usekamori/sdk@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/sdk --access public --provenance
 
       - name: Publish @usekamori/mcp
-        run: npm publish --workspace=packages/mcp --access public --provenance
+        run: |
+          VERSION=$(node -p "require('./packages/mcp/package.json').version")
+          npm view @usekamori/mcp@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/mcp --access public --provenance
+
 
       - name: Publish @usekamori/ingest
-        run: npm publish --workspace=packages/ingest --access public --provenance
+        run: |
+          VERSION=$(node -p "require('./packages/ingest/package.json').version")
+          npm view @usekamori/ingest@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/ingest --access public --provenance
+
 
       - name: Publish kamori (CLI scaffolder)
-        run: npm publish --workspace=packages/npx-kamori --access public --provenance
+        run: |
+          VERSION=$(node -p "require('./packages/npx-kamori/package.json').version")
+          npm view kamori@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/npx-kamori --access public --provenance
+
 
   # =============================================================================
   # 4. PYPI PUBLISH — OIDC Trusted Publishers (no PYPI_TOKEN secret needed)
