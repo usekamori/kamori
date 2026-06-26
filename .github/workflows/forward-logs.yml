@@ -1,12 +1,15 @@
 name: Forward CI logs to Kamori
 
-# MKR-84: GitHub Action that forwards CI job logs to a Kamori instance.
-# Add to any workflow:
+# MKR-84: Reusable workflow that forwards a CI run event to a Kamori ingest server.
+# Call it as a job from any workflow (typically after all other jobs complete):
 #
-#   - uses: kamori-io/action@v1
-#     with:
-#       kamori-url: ${{ secrets.KAMORI_URL }}
-#       kamori-token: ${{ secrets.KAMORI_TOKEN }}
+#   jobs:
+#     forward-logs:
+#       uses: usekamori/kamori/.github/workflows/forward-logs.yml@main
+#       with:
+#         kamori-url: ${{ secrets.KAMORI_URL }}
+#         kamori-token: ${{ secrets.KAMORI_TOKEN }}
+#       secrets: inherit
 
 on:
   workflow_call:
@@ -25,3 +28,36 @@ on:
         required: false
         type: string
         default: "github-actions"
+
+permissions:
+  contents: read
+
+jobs:
+  forward:
+    name: Forward logs to Kamori
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send workflow event to Kamori
+        shell: bash
+        env:
+          KAMORI_URL: ${{ inputs.kamori-url }}
+          KAMORI_TOKEN: ${{ inputs.kamori-token }}
+          SERVICE: ${{ inputs.service }}
+        run: |
+          curl -sf \
+            -H "Content-Type: application/json" \
+            ${KAMORI_TOKEN:+-H "Authorization: Bearer $KAMORI_TOKEN"} \
+            -d "{
+              \"service\": \"$SERVICE\",
+              \"level\": \"info\",
+              \"workflow_event\": \"workflow_run\",
+              \"workflow\": \"$GITHUB_WORKFLOW\",
+              \"run_id\": \"$GITHUB_RUN_ID\",
+              \"run_number\": $GITHUB_RUN_NUMBER,
+              \"ref\": \"$GITHUB_REF_NAME\",
+              \"sha\": \"$GITHUB_SHA\",
+              \"actor\": \"$GITHUB_ACTOR\",
+              \"repository\": \"$GITHUB_REPOSITORY\",
+              \"trigger\": \"$GITHUB_EVENT_NAME\"
+            }" \
+            "$KAMORI_URL/v1/ingest" || echo "Kamori: ingest failed (non-fatal)"
