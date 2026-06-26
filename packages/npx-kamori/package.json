@@ -1,9 +1,16 @@
 {
   "name": "kamori",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "Elastic-2.0",
   "description": "Scaffold a Kamori self-hosted log ingestion setup",
-  "keywords": ["kamori", "logs", "logging", "mcp", "sqlite", "scaffolding"],
+  "keywords": [
+    "kamori",
+    "logs",
+    "logging",
+    "mcp",
+    "sqlite",
+    "scaffolding"
+  ],
   "homepage": "https://github.com/usekamori/kamori",
   "repository": {
     "type": "git",
