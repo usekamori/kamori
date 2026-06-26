@@ -2,7 +2,7 @@
 
 **Self-hosted log ingestion with an AI-queryable MCP interface.**
 
-Kamori is a lightweight, self-hosted log aggregation system built for AI-assisted debugging. Ship logs from any service to a single HTTP endpoint; Kamori stores them in SQLite and exposes them to Claude, Cursor, and other MCP-compatible AI assistants via a built-in MCP server.
+Kamori is a lightweight, self-hosted log aggregation system built for AI-assisted debugging. It's designed for distributed, cloud native services and microservice architectures as its hip logs from any service to a single HTTP endpoint; Kamori stores them in SQLite and exposes them to Claude, Cursor, and other MCP-compatible AI assistants via a built-in MCP server.
 
 Ask your AI _"what errors happened in the payment service in the last hour?"_ and get real answers from your actual logs — no context-pasting, no dashboard required.
 
