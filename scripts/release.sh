@@ -96,10 +96,9 @@ green "  ✓ on main"
 [[ -z "$(git status --porcelain)" ]] || die "working tree has uncommitted changes — commit or stash first"
 green "  ✓ clean working tree"
 
-git fetch --quiet origin main
-LOCAL="$(git rev-parse HEAD)"
-REMOTE="$(git rev-parse origin/main)"
-[[ "$LOCAL" == "$REMOTE" ]] || die "local main is behind origin/main — run 'git pull' first"
+git fetch --quiet origin
+BEHIND="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+[[ "$BEHIND" == "0" ]] || die "local main is $BEHIND commit(s) behind origin/main — run 'git pull' first"
 green "  ✓ up to date with origin/main"
 
 # ─── resolve new version ──────────────────────────────────────────────────────
