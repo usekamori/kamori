@@ -126,6 +126,7 @@ jobs:
   # 3. Python SDK
   #    Editable install (`pip install -e`) makes kamori_sdk importable without
   #    a separate build step. The [dev] extra resolves to pytest.
+  #    Go SDK: usekamori/kamori-go  |  PHP SDK: usekamori/kamori-php
   # ---------------------------------------------------------------------------
   python:
     name: Python SDK — test
@@ -148,28 +149,3 @@ jobs:
         working-directory: sdks/python
         run: python -m pytest
 
-  # ---------------------------------------------------------------------------
-  # 4. PHP SDK
-  #    Composer installs PHPUnit 10 and autoloads src/ via PSR-4.
-  #    `coverage: none` skips Xdebug/pcov setup — PHP coverage is not
-  #    collected in CI to keep the job fast.
-  # ---------------------------------------------------------------------------
-  php:
-    name: PHP SDK — test
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.2"
-          coverage: none
-
-      - name: Install dependencies
-        working-directory: sdks/php
-        run: composer install --no-progress --prefer-dist
-
-      - name: Run tests
-        working-directory: sdks/php
-        run: vendor/bin/phpunit
