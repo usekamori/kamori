@@ -7,9 +7,10 @@
 # Jobs (in dependency order):
 #   typecheck  → fast tsc gate, runs in parallel with SDK jobs
 #   typescript → build all TS packages + vitest with coverage enforcement
-#   go         → go test + go vet for the Go SDK
 #   python     → pytest for the Python SDK
 #   php        → PHPUnit for the PHP SDK
+#
+# Go SDK lives in usekamori/kamori-go (separate repo).
 
 name: CI
 
@@ -122,34 +123,7 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # 3. Go SDK
-  #    `go test ./...` runs all tests under sdks/go/.
-  #    `go vet ./...` runs the built-in static analyser (catches printf
-  #    mismatches, unreachable code, etc.) at zero extra cost.
-  # ---------------------------------------------------------------------------
-  go:
-    name: Go SDK — test
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          # Cache keyed on go.sum for reproducible, fast module resolution.
-          cache-dependency-path: sdks/go/go.mod
-
-      - name: Test
-        working-directory: sdks/go
-        run: go test ./...
-
-      - name: Vet
-        working-directory: sdks/go
-        run: go vet ./...
-
-  # ---------------------------------------------------------------------------
-  # 4. Python SDK
+  # 3. Python SDK
   #    Editable install (`pip install -e`) makes kamori_sdk importable without
   #    a separate build step. The [dev] extra resolves to pytest.
   # ---------------------------------------------------------------------------
@@ -175,7 +149,7 @@ jobs:
         run: python -m pytest
 
   # ---------------------------------------------------------------------------
-  # 5. PHP SDK
+  # 4. PHP SDK
   #    Composer installs PHPUnit 10 and autoloads src/ via PSR-4.
   #    `coverage: none` skips Xdebug/pcov setup — PHP coverage is not
   #    collected in CI to keep the job fast.
