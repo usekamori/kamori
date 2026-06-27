@@ -33,9 +33,7 @@ sdks/python/.pytest_cache/
 **/*.pyc
 **/*.pyo
 
-# PHP
-sdks/php/vendor/
-sdks/php/.phpunit.result.cache
+# PHP SDK moved to usekamori/kamori-php
 
 # OS
 .DS_Store
