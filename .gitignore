@@ -26,9 +26,7 @@ coverage/
 packages/*/coverage/
 .nyc_output/
 
-# Python
-sdks/python/.venv/
-sdks/python/.pytest_cache/
+# Python SDK moved to usekamori/kamori-python
 **/__pycache__/
 **/*.pyc
 **/*.pyo
