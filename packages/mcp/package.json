@@ -1,6 +1,6 @@
 {
   "name": "@usekamori/mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "license": "Elastic-2.0",
   "description": "Kamori MCP server — query logs from Claude and Cursor",
   "type": "module",
