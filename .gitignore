@@ -35,6 +35,7 @@ sdks/python/.pytest_cache/
 
 # PHP
 sdks/php/vendor/
+sdks/php/.phpunit.result.cache
 
 # OS
 .DS_Store

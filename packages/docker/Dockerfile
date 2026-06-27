@@ -1,5 +1,5 @@
 # Build context: kamori/ root
-# Usage: docker build -t kamori:local -f packages/ingest/Dockerfile .
+# Usage: docker build -t kamori:local -f packages/docker/Dockerfile .
 
 # ---- build ----------------------------------------------------------------
 FROM node:22-alpine AS build
@@ -51,7 +51,7 @@ COPY --from=build /app/packages/mcp/dist    ./packages/mcp/dist
 COPY --from=build /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 
 # Entrypoint script
-COPY packages/ingest/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY packages/docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Persistent log data
 RUN mkdir -p /app/data/logs /app/data/system
