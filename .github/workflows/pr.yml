@@ -134,9 +134,10 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 4. SDK matrix
-  #    Runs Go, Python, and PHP SDK tests in parallel so SDK regressions are
+  #    Runs Python and PHP SDK tests in parallel so SDK regressions are
   #    caught before merge. Each job is independent — one failure does not
   #    cancel the others (`fail-fast: false`).
+  #    Go SDK lives in usekamori/kamori-go (tested there).
   # ---------------------------------------------------------------------------
   sdk-matrix:
     name: SDK — ${{ matrix.name }}
@@ -145,9 +146,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Go
-            setup: go
-            go-version: "1.22"
           - name: Python
             setup: python
             python-version: "3.11"
@@ -157,18 +155,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # --- Go ---
-      - uses: actions/setup-go@v5
-        if: matrix.setup == 'go'
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache-dependency-path: sdks/go/go.mod
-
-      - name: Go — test & vet
-        if: matrix.setup == 'go'
-        working-directory: sdks/go
-        run: go test ./... && go vet ./...
 
       # --- Python ---
       - uses: actions/setup-python@v5
