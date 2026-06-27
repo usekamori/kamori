@@ -2,7 +2,7 @@
 # release.sh — Create a kamori release
 #
 # Bumps package.json versions, commits, pushes, tags, and pushes the tag.
-# Pushing the tag triggers release.yml which publishes to npm/PyPI/Docker.
+# Pushing the tag triggers release.yml which publishes to npm + Docker.
 #
 # Usage:
 #   ./scripts/release.sh <version> [--only <pkg,...>] [--dry-run]
@@ -134,7 +134,7 @@ git ls-remote --tags origin "refs/tags/$TAG" 2>/dev/null | grep -q "$TAG" && die
 # ─── show plan ────────────────────────────────────────────────────────────────
 step "Release plan"
 echo "  Tag:     $TAG"
-echo "  Trigger: release.yml → test → publish npm + PyPI + Docker + GitHub Release"
+echo "  Trigger: release.yml → test → publish npm + Docker + GitHub Release"
 echo "  Packages:"
 for t in $TARGETS; do
   CUR="$(node -p "require('./"$(pkg_path "$t")"/package.json').version")"

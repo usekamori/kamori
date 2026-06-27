@@ -7,29 +7,18 @@
 # Pipeline (jobs run in parallel after tests pass):
 #
 #   test-ts        → TypeScript build + vitest + coverage
-#   test-sdks      → Go / Python / PHP in parallel (fail-fast: false)
 #   publish-npm    → @usekamori/sdk, @usekamori/mcp, @usekamori/ingest, kamori (CLI)
-#   publish-pypi   → kamori-sdk on PyPI
 #   publish-docker → multi-arch Docker image pushed to ghcr.io
 #   github-release → GitHub Release created with auto-generated changelog
 #
-# Registry authentication — all via OIDC, no long-lived tokens:
+# SDK releases handled by their own repos:
+#   Python → usekamori/kamori-python (publishes to PyPI)
+#   PHP    → usekamori/kamori-php    (Packagist via webhook)
+#   Go     → usekamori/kamori-go     (pkg.go.dev auto-indexed)
 #
-#   npm   — Trusted Publishers. One-time setup per package on npmjs.com:
-#             Package → Settings → Trusted Publishers → Add publisher
-#             → org: usekamori, repo: kamori, workflow: release.yml, environment: npm
-#
-#   PyPI  — Trusted Publishers. One-time setup on pypi.org:
-#             Account → Publishing → Add a new pending publisher
-#             → owner: usekamori, repo: kamori, workflow: release.yml, environment: pypi
-#
-#   Packagist — webhook-based, no CI publish step needed.
-#               One-time setup: submit https://github.com/usekamori/kamori to packagist.org,
-#               then add the GitHub webhook Packagist provides to the repo settings.
-#               Packagist re-indexes automatically on every tag push.
-#
-#   Go (pkg.go.dev) — fully automatic, no setup required.
-#               pkg.go.dev indexes sdks/go/ when the tag is pushed.
+# npm — Trusted Publishers. One-time setup per package on npmjs.com:
+#         Package → Settings → Trusted Publishers → Add publisher
+#         → org: usekamori, repo: kamori, workflow: release.yml, environment: npm
 
 name: Release
 
@@ -41,7 +30,7 @@ on:
 permissions:
   contents: write   # create GitHub Release
   packages: write   # push Docker image to GHCR
-  id-token: write   # OIDC for npm + PyPI provenance
+  id-token: write   # OIDC for npm provenance
 
 concurrency:
   group: release-${{ github.ref }}
@@ -73,33 +62,13 @@ jobs:
         run: npx vitest run --coverage
 
   # =============================================================================
-  # 2. Python SDK test
-  #    Go SDK: usekamori/kamori-go  |  PHP SDK: usekamori/kamori-php
   # =============================================================================
-  test-sdks:
-    name: SDK — Python
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: sdks/python/pyproject.toml
-
-      - name: Install & test
-        working-directory: sdks/python
-        run: pip install -e ".[dev]" && python -m pytest
-
-  # =============================================================================
-  # 3. NPM PUBLISH — OIDC Trusted Publishers (no NPM_TOKEN secret needed)
+  # 2. NPM PUBLISH — OIDC Trusted Publishers (no NPM_TOKEN secret needed)
   # =============================================================================
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
-    needs: [test-ts, test-sdks]
+    needs: [test-ts]
     environment: npm   # must match the environment configured in the Trusted Publisher
 
     steps:
@@ -141,42 +110,14 @@ jobs:
 
 
   # =============================================================================
-  # 4. PYPI PUBLISH — OIDC Trusted Publishers (no PYPI_TOKEN secret needed)
-  # =============================================================================
-  publish-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: [test-ts, test-sdks]
-    environment: pypi   # must match the environment configured in the Trusted Publisher
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build tools
-        run: pip install build
-
-      - name: Build distribution
-        working-directory: sdks/python
-        run: python -m build
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: sdks/python/dist/
-
-  # =============================================================================
-  # 5. DOCKER PUBLISH
+  # 3. DOCKER PUBLISH
   #    Builds a multi-arch image (amd64 + arm64) and pushes to GHCR.
   #    Tags produced from v1.2.3: 1.2.3, 1.2, 1, latest
   # =============================================================================
   publish-docker:
     name: Publish Docker image
     runs-on: ubuntu-latest
-    needs: [test-ts, test-sdks]
+    needs: [test-ts]
 
     steps:
       - uses: actions/checkout@v4
@@ -218,12 +159,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   # =============================================================================
-  # 6. GITHUB RELEASE + CHANGELOG
+  # 4. GITHUB RELEASE + CHANGELOG
   # =============================================================================
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [publish-npm, publish-pypi, publish-docker]
+    needs: [publish-npm, publish-docker]
 
     steps:
       - uses: actions/checkout@v4
