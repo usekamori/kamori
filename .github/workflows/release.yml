@@ -79,6 +79,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: npm ci
@@ -87,21 +88,29 @@ jobs:
         run: npm run build
 
       - name: Publish @usekamori/sdk
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           VERSION=$(node -p "require('./packages/sdk/package.json').version")
           npm view @usekamori/sdk@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/sdk --access public --provenance --loglevel verbose
 
       - name: Publish @usekamori/mcp
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           VERSION=$(node -p "require('./packages/mcp/package.json').version")
           npm view @usekamori/mcp@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/mcp --access public --provenance --loglevel verbose
 
       - name: Publish @usekamori/ingest
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           VERSION=$(node -p "require('./packages/ingest/package.json').version")
           npm view @usekamori/ingest@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/ingest --access public --provenance --loglevel verbose
 
       - name: Publish kamori (CLI scaffolder)
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           VERSION=$(node -p "require('./packages/npx-kamori/package.json').version")
           npm view kamori@$VERSION version 2>/dev/null && echo "already published, skipping" || npm publish --workspace=packages/npx-kamori --access public --provenance --loglevel verbose
