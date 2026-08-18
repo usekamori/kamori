@@ -281,3 +281,61 @@ export const config = { matcher: "/((?!_next|favicon.ico).*)" };
 **`withKamori(handler, opts)` options**
 
 `opts` is a `KamoriClientOptions` object (`url`, `token`, `batchSize`, `flushInterval`, etc.) — the same options accepted by `KamoriClient`. A single client instance is created per `withKamori` call and shared across all requests.
+
+## Trace correlation — `@usekamori/sdk`
+
+Kamori auto-attaches a `trace_id` to every event so logs from different services join
+into one request chain (query them with the `trace_logs` MCP tool). Resolution order:
+an explicit `trace_id` on the event wins, then the ambient context, then the active
+OpenTelemetry span.
+
+### Ambient context (Tier 0)
+
+Set an id once per request; every log inside the callback carries it:
+
+```typescript
+import { KamoriClient, withTrace, generateTraceId } from "@usekamori/sdk";
+
+const kamori = new KamoriClient({ url: process.env.KAMORI_URL! });
+
+withTrace(generateTraceId(), () => {
+  kamori.log({ service: "api", level: "info", message: "request received" });
+  kamori.log({ service: "api", level: "error", message: "payment failed" });
+  // both events share the same trace_id
+});
+```
+
+`setTraceContext({ trace_id })` sets the id without wrapping a callback (for middleware).
+
+### OpenTelemetry (Tier 2)
+
+If `@opentelemetry/api` is installed and a span is active, its `trace_id` and `span_id`
+are attached automatically — no code changes:
+
+```typescript
+import { trace } from "@opentelemetry/api";
+
+trace.getTracer("app").startActiveSpan("checkout", (span) => {
+  kamori.log({ service: "api", level: "info", message: "charging card" });
+  // → event carries the span's trace_id + span_id
+  span.end();
+});
+```
+
+OpenTelemetry is an **optional** peer — the SDK installs and runs without it.
+
+### Cross-service propagation (Tier 1)
+
+Reuse an inbound W3C `traceparent` (or `x-request-id`) so a request keeps one id across
+services, or generate one at the edge:
+
+```typescript
+import { traceFromHeaders, generateTraceId, withTrace } from "@usekamori/sdk";
+
+const trace_id =
+  traceFromHeaders((n) => req.headers.get(n))?.trace_id ?? generateTraceId();
+withTrace(trace_id, () => handle(req));
+```
+
+The Next.js middleware (`@usekamori/sdk/next`) does this automatically. With pino, add
+the id to your console output too via `mixin: kamoriMixin()`.

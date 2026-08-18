@@ -46,6 +46,7 @@ The following are **out of scope**:
 
 ## Security design notes
 
+- **Secure by default** — an empty `INGEST_TOKEN` disables auth (a single-tenant convenience for loopback/dev). To stop "open to the network" from being an accidental default: `npx kamori` and the Docker image both generate a token when none is provided, the server logs a prominent warning whenever it runs open, and it **refuses to start** when bound to a network interface with `NODE_ENV=production` and no token. Set `KAMORI_ALLOW_NO_AUTH=true` to deliberately run open on a trusted network.
 - **Token auth** — `INGEST_TOKEN` comparison uses SHA-256 hashing + `timingSafeEqual` to prevent timing attacks.
 - **Webhook signatures** — all supported providers (Vercel, GitHub, Render) use HMAC-based verification with timing-safe comparison. Render signatures include a 5-minute replay protection window.
 - **Input limits** — request body is capped at `BODY_LIMIT_BYTES` (default 1 MB), per-request row count at `MAX_ROWS` (default 1000), and optionally individual row size at `MAX_ROW_BYTES` (default 0 = disabled). Cloud deployments enforce per-plan row byte limits automatically.

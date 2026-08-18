@@ -15,7 +15,7 @@ npx kamori
 
 Repo URL and branch are configured at the top of `packages/kamori/src/index.ts` (`KAMORI_GIT_URL`, `KAMORI_GIT_REF`).
 
-By default, scaffolds are **tokenless** (`INGEST_TOKEN=` and `MCP_TOKEN=`) unless you explicitly set `--log-token` / `--mcp-token` or opt in during interactive prompts. MCP is on unless **`--no-mcp`**.
+By default, scaffolds are **secured with a generated token** — a strong random `INGEST_TOKEN` (and `MCP_TOKEN` when MCP is on) is written to `.env` and shown in the setup output. Provide your own with `--log-token` / `--mcp-token`, or run without auth using `--no-token` / `--no-mcp-token`. MCP is on unless **`--no-mcp`**.
 If you don't provide a CORS allowlist, `ALLOWED_ORIGINS` is set to `*` (allow all origins). For production, set a strict allowlist in `.env`.
 
 The generated **`.env`** lists every Community Edition variable (same set as [`@usekamori/core`](https://github.com/usekamori/kamori/tree/main/packages/core)) with safe self-hosted defaults. Full reference: **[docs.kamori.io/configuration](https://docs.kamori.io/configuration)**.
@@ -60,19 +60,21 @@ Arguments:
 
 Options:
   --docker              Use Docker (compose + docs). Omit for Node-from-source (clone + build).
-  --log-token <secret>  Set INGEST_TOKEN (Authorization: Bearer)
-  --mcp-token <secret>  Set MCP_TOKEN (MCP HTTP Bearer)
+  --log-token <secret>  Set INGEST_TOKEN explicitly (otherwise generated).
+  --mcp-token <secret>  Set MCP_TOKEN explicitly (otherwise generated).
+  --no-token            Run ingest without auth (empty INGEST_TOKEN).
+  --no-mcp-token        Run MCP HTTP without auth (empty MCP_TOKEN).
   --allowed-origins <list>  Comma-separated CORS allowlist for browser-originated logs.
                             Example: http://localhost:5173,http://localhost:3110
   --log-port <n>        Ingest port (default: 3110)
   --mcp-port <n>        MCP port (default: 3111)
   --no-mcp              No MCP server / no .mcp.json
-  --yes, -y             Non-interactive (default: Node path, MCP on, tokens disabled)
+  --yes, -y             Non-interactive (default: Node path, MCP on, tokens generated)
 ```
 
 ### Interactive (default)
 
-Prompts include: directory name, **Use Docker? (y/N)** → default **N** (Node), **Set INGEST_TOKEN? (y/N)**, disable MCP?, **Set MCP_TOKEN? (y/N)**, and allowed origins (leave blank to allow all origins via `ALLOWED_ORIGINS=*`).
+Prompts include: directory name, **Use Docker? (y/N)** → default **N** (Node), **Generate INGEST_TOKEN? (Y/n)** → default **Y** (say **n** to enter your own or disable), disable MCP?, **Generate MCP_TOKEN? (Y/n)**, and allowed origins (leave blank to allow all origins via `ALLOWED_ORIGINS=*`).
 
 ### Non-interactive examples
 

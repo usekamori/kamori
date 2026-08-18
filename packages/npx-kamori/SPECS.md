@@ -41,9 +41,13 @@ It supports two execution modes:
 - `--docker`  
   Use Docker Compose/image path instead of cloning and building Kamori source.
 - `--log-token <secret>`  
-  Explicitly set `INGEST_TOKEN`.
+  Explicitly set `INGEST_TOKEN` (otherwise a strong token is generated).
 - `--mcp-token <secret>`  
-  Explicitly set `MCP_TOKEN`.
+  Explicitly set `MCP_TOKEN` (otherwise generated when MCP is enabled).
+- `--no-token`  
+  Run the ingest API without auth (empty `INGEST_TOKEN`), overriding the default generation.
+- `--no-mcp-token`  
+  Run MCP HTTP without auth (empty `MCP_TOKEN`).
 - `--allowed-origins <csv>`  
   Set `ALLOWED_ORIGINS` (comma-separated string as provided).
 - `--log-port <n>`  
@@ -73,11 +77,9 @@ It supports two execution modes:
 
 - Project directory (default `kamori-ai`)
 - Docker usage (`y/N`) unless `--docker` passed
-- Set `INGEST_TOKEN`? (`y/N`)
-- If opted in: prompt for `INGEST_TOKEN` value (blank -> disabled)
+- Generate `INGEST_TOKEN`? (`Y/n`, default **generate**) — on `n`, prompt for your own value (blank -> disabled)
 - Disable MCP (`y/N`) unless `--no-mcp` passed
-- Set `MCP_TOKEN`? (`y/N`, only when MCP enabled and no explicit value)
-- If opted in: prompt for `MCP_TOKEN` value (blank -> disabled)
+- Generate `MCP_TOKEN`? (`Y/n`, only when MCP enabled and no explicit value) — on `n`, prompt for your own value (blank -> disabled)
 - Allowed origins prompt:
   - blank input -> `ALLOWED_ORIGINS=*` (allow all origins)
 

@@ -5,7 +5,7 @@
  */
 
 import { vi, describe, it, expect, afterEach } from "vitest";
-import { decodeJwtExpiry, scheduleSessionExpiry } from "./start-mcp.js";
+import { decodeJwtExpiry, decodeJwtSub, scheduleSessionExpiry } from "./start-mcp.js";
 
 // ---------------------------------------------------------------------------
 // Helpers to build minimal JWTs (unsigned — we only need the payload shape)
@@ -50,6 +50,37 @@ describe("decodeJwtExpiry", () => {
 
   it("returns null for an empty string", () => {
     expect(decodeJwtExpiry("")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decodeJwtSub — used to bind an MCP session to its API key so the session can
+// be torn down when that key is revoked/rotated.
+// ---------------------------------------------------------------------------
+
+describe("decodeJwtSub", () => {
+  it("returns the sub claim (API key id) from a valid JWT payload", () => {
+    expect(decodeJwtSub(makeJwt({ sub: "key-123", pid: "proj-1" }))).toBe("key-123");
+  });
+
+  it("returns null when the JWT has no sub claim", () => {
+    expect(decodeJwtSub(makeJwt({ pid: "proj-1" }))).toBeNull();
+  });
+
+  it("returns null when sub is not a string", () => {
+    expect(decodeJwtSub(makeJwt({ sub: 42 }))).toBeNull();
+  });
+
+  it("returns null for a plain token string (e.g. a static MCP_TOKEN)", () => {
+    expect(decodeJwtSub("plain-mcp-token")).toBeNull();
+  });
+
+  it("returns null for a malformed base64url payload", () => {
+    expect(decodeJwtSub("header.!!!.sig")).toBeNull();
+  });
+
+  it("returns null for an empty string", () => {
+    expect(decodeJwtSub("")).toBeNull();
   });
 });
 

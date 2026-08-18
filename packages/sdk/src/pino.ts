@@ -15,6 +15,9 @@
 import { KamoriClient } from "./client.js";
 import type { KamoriClientOptions } from "./client.js";
 import { Writable } from "stream";
+// Importing ./trace registers the ambient-trace resolver on KamoriClient, so
+// events forwarded through this stream auto-attach the current trace_id.
+import { getTraceId } from "./trace.js";
 
 /**
  * Create a Node.js Writable stream that forwards pino log lines to a Kamori
@@ -59,4 +62,26 @@ export function createKamoriStream(opts: KamoriClientOptions): Writable {
       callback();
     },
   });
+}
+
+/**
+ * A pino `mixin` that stamps the current ambient `trace_id` onto every log line
+ * — in both the console output and the Kamori event. Runs in the main thread at
+ * log time, so it stays correct even under pino's worker-thread transports
+ * (where main-thread AsyncLocalStorage is not visible).
+ *
+ * @example
+ * import pino from "pino";
+ * import { createKamoriStream, kamoriMixin } from "@usekamori/sdk/pino";
+ *
+ * const logger = pino(
+ *   { mixin: kamoriMixin() },
+ *   createKamoriStream({ url: "https://logs.example.com", token: "..." }),
+ * );
+ */
+export function kamoriMixin(): () => Record<string, unknown> {
+  return () => {
+    const t = getTraceId();
+    return t ? { trace_id: t } : {};
+  };
 }

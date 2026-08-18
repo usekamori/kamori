@@ -12,6 +12,7 @@ import {
   handleSummarizeErrors,
   handleTailLogs,
   handleGetLog,
+  handleFindRelatedTraces,
   handleAlertSummary,
   handleWatchLogs,
   handleAnomalyHint,
@@ -199,6 +200,29 @@ describe("handleTailLogs", () => {
     expect(text(result)).toContain("timeout error");
     expect(text(result)).not.toContain("all good");
   });
+
+  it("anchors on `since` when after_id is omitted", async () => {
+    await seed([{ message: "old-a" }], "2024-01-01T00:00:00.000Z");
+    await seed([{ message: "new-b" }], "2024-06-01T00:00:00.000Z");
+    const result = await handleTailLogs(adapter, {
+      since: "2024-03-01T00:00:00.000Z",
+    });
+    const t = text(result);
+    expect(t).toContain("new-b");
+    expect(t).not.toContain("old-a");
+  });
+
+  it("after_id takes precedence over since", async () => {
+    await seed([{ message: "old-a" }], "2024-01-01T00:00:00.000Z");
+    await seed([{ message: "new-b" }], "2024-06-01T00:00:00.000Z");
+    // after_id: 0 means from the beginning; since would have skipped old-a, but
+    // after_id wins so both rows are returned.
+    const result = await handleTailLogs(adapter, {
+      after_id: 0,
+      since: "2024-03-01T00:00:00.000Z",
+    });
+    expect(text(result)).toContain("old-a");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -274,6 +298,18 @@ describe("handleWatchLogs", () => {
     expect(t).toContain("No new logs");
     expect(t).toContain(`last_id=${row.id}`);
   }, 5000); // allow up to 5s for the 1s timeout
+
+  it("anchors on `since` when after_id is omitted", async () => {
+    await seed([{ message: "old-a" }], "2024-01-01T00:00:00.000Z");
+    await seed([{ message: "new-b" }], "2024-06-01T00:00:00.000Z");
+    const result = await handleWatchLogs(adapter, {
+      since: "2024-03-01T00:00:00.000Z",
+      timeout_seconds: 1,
+    });
+    const t = text(result);
+    expect(t).toContain("new-b");
+    expect(t).not.toContain("old-a");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -500,6 +536,38 @@ describe("handleTraceLogs", () => {
     ]);
     const result = await handleTraceLogs(adapter, { trace_id: "t2", limit: 2 });
     expect(text(result).split("\n")).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// find_related_traces
+// ---------------------------------------------------------------------------
+
+describe("handleFindRelatedTraces", () => {
+  it("returns 'not found' for an unknown log id", async () => {
+    const result = await handleFindRelatedTraces(adapter, { log_id: 999999 });
+    expect(text(result)).toContain("not found");
+  });
+
+  it("expands a log into its full trace across services", async () => {
+    await seed([
+      { trace_id: "trace-abc", service: "api", message: "request received", seq: 1 },
+      { trace_id: "trace-abc", service: "db", message: "query executed", seq: 2 },
+      { trace_id: "trace-xyz", service: "api", message: "other trace", seq: 3 },
+    ]);
+    const [anchor] = await queryLogs(adapter, { trace_id: "trace-abc" });
+    const result = await handleFindRelatedTraces(adapter, { log_id: anchor.id });
+    const t = text(result);
+    expect(t).toContain("request received");
+    expect(t).toContain("query executed");
+    expect(t).not.toContain("other trace");
+  });
+
+  it("explains when the anchor log has no trace_id", async () => {
+    await seed([{ service: "api", message: "no trace here", seq: 99 }]);
+    const [row] = await queryLogs(adapter, { service: "api" });
+    const result = await handleFindRelatedTraces(adapter, { log_id: row.id });
+    expect(text(result)).toContain("has no trace_id");
   });
 });
 

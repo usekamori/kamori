@@ -14,6 +14,18 @@ export interface McpAdapter {
    * For Cloud, the context contains the bearer token or project id.
    */
   resolveDb(context?: { token?: string }): Promise<DbAdapter>;
+
+  /**
+   * Optional: report whether an API key (JWT `sub` = api_keys.id) has been
+   * revoked. Cloud implements this against its in-memory revocation blocklist so
+   * the MCP transport can proactively close sessions whose key was revoked or
+   * rotated, rather than waiting for the next tool call to reject. Self-hosted
+   * (single static MCP_TOKEN, no revocation) leaves this undefined.
+   *
+   * Must be a cheap, synchronous, in-memory check — it runs in the session
+   * sweep across all live sessions.
+   */
+  isRevoked?(sub: string): boolean;
 }
 
 /**

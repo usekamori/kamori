@@ -1,15 +1,20 @@
 import * as path from "path";
+import { z } from "zod";
+
+/** Zod-backed env-int parsing (D1/Q9): same contract and error text as before. */
+const nonNegativeIntString = z
+  .string()
+  .refine((raw) => Number.isInteger(Number(raw)) && Number(raw) >= 0);
 
 function parseIntEnv(name: string, defaultValue: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return defaultValue;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) {
+  if (!nonNegativeIntString.safeParse(raw).success) {
     throw new Error(
       `Invalid environment variable ${name}="${raw}": expected a non-negative integer`,
     );
   }
-  return n;
+  return Number(raw);
 }
 
 export const PORT = parseIntEnv("PORT", 3110);
@@ -36,6 +41,24 @@ export const DB_PATH =
   process.env.DB_PATH ?? path.join(process.cwd(), "data", "logs", "ingress.db");
 export const MCP_TOKEN = process.env.MCP_TOKEN ?? "";
 export const MCP_PORT = parseIntEnv("MCP_PORT", 3111);
+/**
+ * Allow-lists for the MCP Streamable-HTTP transport's DNS-rebinding protection.
+ * When either list is non-empty, the transport rejects requests whose Host /
+ * Origin header is not listed — blocking browser DNS-rebinding attacks against a
+ * locally- or internally-bound MCP server. Server-to-server clients send no
+ * Origin and connect via the real host, so they are unaffected.
+ *
+ * Example:
+ *   MCP_ALLOWED_HOSTS=mcp.kamori.io,127.0.0.1:3111,localhost:3111
+ *   MCP_ALLOWED_ORIGINS=https://app.kamori.io
+ * Leave both empty to disable the check (self-hosted default).
+ */
+function splitCsvEnv(name: string): string[] {
+  const raw = process.env[name];
+  return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+}
+export const MCP_ALLOWED_HOSTS: string[] = splitCsvEnv("MCP_ALLOWED_HOSTS");
+export const MCP_ALLOWED_ORIGINS: string[] = splitCsvEnv("MCP_ALLOWED_ORIGINS");
 /**
  * When set, the /metrics endpoint requires `Authorization: Bearer <METRICS_TOKEN>`.
  * Requests with a missing or non-matching token receive 401.
@@ -76,3 +99,14 @@ export const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
  * by cloud-injected ServerPlugins. Self-hosted deployments leave this unset.
  */
 export const CLOUD_MODE = process.env.CLOUD_MODE === "true";
+
+/**
+ * Explicit opt-in to run the self-hosted ingest server WITHOUT authentication
+ * (empty `INGEST_TOKEN`). Only safe on a trusted/loopback-only deployment.
+ *
+ * When false (default) and the server is bound to a network interface in
+ * production with no token, startup is refused — see the ingest entrypoint's
+ * auth-posture check. This makes "open to the network" a deliberate choice
+ * rather than an accidental default.
+ */
+export const ALLOW_NO_AUTH = process.env.KAMORI_ALLOW_NO_AUTH === "true";

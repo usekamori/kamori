@@ -194,6 +194,34 @@ describe("pipeline: ingest → FTS search → get single log", () => {
 
     await app.close();
   });
+
+  it("combines full-text search with an exact level filter", async () => {
+    const app = await buildApp();
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/ingest",
+      headers: { ...AUTH, "content-type": "application/json" },
+      payload: [
+        { service: "api", level: "error", message: "checkout failed hard" },
+        { service: "api", level: "warn", message: "checkout failed softly" },
+        { service: "api", level: "info", message: "checkout ok" },
+      ],
+    });
+
+    // level narrows the FTS result set — exact match on the indexed column
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/search?q=checkout&level=error",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const { logs, count } = res.json();
+    expect(count).toBe(1);
+    expect(logs[0].level).toBe("error");
+
+    await app.close();
+  });
 });
 
 // ---------------------------------------------------------------------------

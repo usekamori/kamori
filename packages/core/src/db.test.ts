@@ -20,6 +20,7 @@ import {
   queryByField,
   histogramLogs,
   isValidIso,
+  resolveCursorForTime,
   _resetServicesCache,
 } from "./db.js";
 
@@ -557,6 +558,41 @@ describe("searchLogs", () => {
     const rows = await searchLogs(adapter, "error", { service: "api" });
     expect(rows).toHaveLength(1);
     expect(rows[0].service).toBe("api");
+  });
+
+  it("respects level filter (exact match on indexed column)", async () => {
+    await insertLogs(
+      adapter,
+      [
+        { level: "error", message: "db timeout" },
+        { level: "warn", message: "db timeout" },
+        { level: "info", message: "db timeout" },
+      ],
+      "2024-01-01T00:00:00.000Z",
+    );
+    const rows = await searchLogs(adapter, "timeout", { level: "error" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].level).toBe("error");
+  });
+
+  it("combines level with service and time filters", async () => {
+    await insertLogs(
+      adapter,
+      [
+        { service: "api", level: "error", message: "combo hit" },
+        { service: "api", level: "info", message: "combo hit" },
+        { service: "worker", level: "error", message: "combo hit" },
+      ],
+      "2024-01-01T00:00:00.000Z",
+    );
+    const rows = await searchLogs(adapter, "combo", {
+      service: "api",
+      level: "error",
+      since: "2023-12-31T00:00:00.000Z",
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].service).toBe("api");
+    expect(rows[0].level).toBe("error");
   });
 
   it("respects since filter", async () => {
@@ -1287,5 +1323,75 @@ describe("getLogCounts", () => {
     await insertLogs(adapter, [{ service: "b", level: "info", seq: 3 }], ts);
     const rows = await getLogCounts(adapter);
     expect(rows[0].count).toBeGreaterThanOrEqual(rows[1].count);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveCursorForTime — time-anchored tail cursor
+// ---------------------------------------------------------------------------
+
+describe("resolveCursorForTime", () => {
+  it("returns 0 on an empty table", async () => {
+    expect(await resolveCursorForTime(adapter, "2024-01-01T00:00:00.000Z")).toBe(
+      0,
+    );
+  });
+
+  it("returns 0 when every row is at or after `since` (tail from beginning)", async () => {
+    await insertLogs(adapter, [{ msg: "a" }], "2024-06-01T00:00:00.000Z");
+    await insertLogs(adapter, [{ msg: "b" }], "2024-06-01T00:00:01.000Z");
+    // since before all rows → no row strictly before it → cursor 0
+    expect(await resolveCursorForTime(adapter, "2024-01-01T00:00:00.000Z")).toBe(
+      0,
+    );
+  });
+
+  it("returns the largest id strictly before `since`", async () => {
+    await insertLogs(adapter, [{ msg: "old" }], "2024-01-01T00:00:00.000Z"); // id 1
+    await insertLogs(adapter, [{ msg: "mid" }], "2024-06-01T00:00:00.000Z"); // id 2
+    await insertLogs(adapter, [{ msg: "new" }], "2024-12-01T00:00:00.000Z"); // id 3
+    // since between mid and new → cursor should be id 2
+    const cursor = await resolveCursorForTime(
+      adapter,
+      "2024-09-01T00:00:00.000Z",
+    );
+    expect(cursor).toBe(2);
+    // Tailing from that cursor yields only rows at/after `since`
+    const rows = await queryLogs(adapter, { after_id: cursor });
+    expect(rows.map((r) => r.id)).toEqual([3]);
+  });
+
+  it("is inclusive of rows exactly at `since` (tie-safe)", async () => {
+    const ts = "2024-06-01T00:00:00.000Z";
+    await insertLogs(adapter, [{ msg: "before" }], "2024-05-31T23:59:59.000Z"); // id 1
+    await insertLogs(adapter, [{ msg: "at-1" }], ts); // id 2
+    await insertLogs(adapter, [{ msg: "at-2" }], ts); // id 3
+    const cursor = await resolveCursorForTime(adapter, ts);
+    // cursor is the id strictly before `since` → id 1
+    expect(cursor).toBe(1);
+    // Both rows sharing received_at == since are returned by the tail
+    const rows = await queryLogs(adapter, { after_id: cursor });
+    expect(rows.map((r) => r.id)).toEqual([2, 3]);
+  });
+
+  it("clock-skew: a higher-id row with earlier received_at is excluded from the anchor but reachable once the cursor advances", async () => {
+    const since = "2024-06-01T12:00:00.000Z";
+    // One row before the window → anchor resolves to its id.
+    await insertLogs(adapter, [{ msg: "before" }], "2024-06-01T00:00:00.000Z"); // id 1
+    const cursor = await resolveCursorForTime(adapter, since);
+    expect(cursor).toBe(1);
+
+    // Now a backwards-clock / late arrival: a HIGHER id whose received_at is
+    // EARLIER than `since`. This is exactly the row a persistent since-filter
+    // (the rejected pass-through approach) would drop.
+    await insertLogs(adapter, [{ msg: "skewed" }], "2024-06-01T06:00:00.000Z"); // id 2
+
+    // Resolve-once (pure id cursor) DELIVERS it…
+    const delivered = await queryLogs(adapter, { after_id: cursor });
+    expect(delivered.map((r) => r.id)).toEqual([2]);
+
+    // …whereas re-applying `since` on every poll would silently drop it (gap).
+    const dropped = await queryLogs(adapter, { after_id: cursor, since });
+    expect(dropped).toHaveLength(0);
   });
 });

@@ -76,7 +76,12 @@ export function verifyWebhookSignature(
     // Without abs, a timestamp in the far future yields a negative difference
     // which is not > 300 and incorrectly passes the replay window check.
     if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > 300) return false;
-    const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+    // The signature must cover the timestamp, not just the body — otherwise the
+    // `t=` value is unauthenticated and an attacker could replay a captured
+    // signature with a fresh timestamp, defeating the 5-minute replay window.
+    // Signed payload is `<timestamp>.<body>` (matching the `t=,v1=` scheme).
+    const signedPayload = Buffer.concat([Buffer.from(`${tsMatch[1]}.`), rawBody]);
+    const expected = createHmac("sha256", secret).update(signedPayload).digest("hex");
     return safeEqual(expected, sigMatch[1]);
   }
 

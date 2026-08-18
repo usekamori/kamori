@@ -35,7 +35,7 @@ Kamori ships one ingest server (`@usekamori/ingest`) and one MCP server (`@useka
 
 **Community** is single-tenant: one fixed SQLite database, one optional shared secret (`INGEST_TOKEN`), no projects, no billing, no Postgres.
 
-**Cloud** is multi-tenant: every request carries an Ed25519 JWT API key. The JWT's `pid` claim routes each request to the correct per-project libSQL/Turso database. Billing, usage, and project metadata live in Postgres.
+**Cloud** is multi-tenant: every request carries an Ed25519 JWT API key. The JWT's `pid` claim routes each request to the correct per-project libSQL (sqld) namespace. Billing, usage, and project metadata live in Postgres.
 
 The adapter interfaces in `@usekamori/core` are the seam — all cloud-specific logic stays in `kamori-cloud/packages/entrypoint` and is never imported by this package.
 
@@ -52,11 +52,11 @@ The adapter interfaces in `@usekamori/core` are the seam — all cloud-specific 
 
 Core adapter interfaces:
 
-- `DbAdapter`: async contract for `run`, `query`, `get`, `batch` (atomic), and `exec`.
+- `DbAdapter`: async contract for `run`, `query`, `get`, `batch` (atomic), `exec`, and optional `readonlyQuery` (a hard read-only SELECT — `PRAGMA query_only` on better-sqlite3, a read-only transaction on libSQL — used by the MCP `query_sql` escape hatch so a crafted statement cannot write).
 - `AuthAdapter`: `verifyIngestToken(token)` returns `null | false | true | projectId`.
 - `BillingAdapter`: ingest access and usage reporting hooks.
 - `RetentionAdapter`: `getCutoffDate()` for retention cutoff or disabled mode.
-- `McpAdapter`: `resolveDb(context?)` for MCP tool DB routing.
+- `McpAdapter`: `resolveDb(context?)` for MCP tool DB routing, plus optional `isRevoked(sub)` — a cheap synchronous revocation check the MCP transport uses to proactively close sessions whose key was revoked/rotated (cloud implements it against its blocklist; OSS leaves it undefined).
 - `EmailAdapter`: optional notification hooks.
 - `ServerPlugins`: optional cloud hooks (`getDbAdapter`, `verifyToken`, `checkIngestAccess`, `runRetention`).
 
@@ -76,12 +76,15 @@ Env values are parsed once at module load in `env.ts`.
 - Integer envs use `parseIntEnv(name, default)` and must be non-negative integers; invalid values throw.
 - Key defaults:
   - `PORT=3110`, `HOST=0.0.0.0`
-  - `INGEST_TOKEN=""`
+  - `INGEST_TOKEN=""` (empty = auth disabled; see the ingest startup auth-posture check)
+  - `ALLOW_NO_AUTH=false` (`KAMORI_ALLOW_NO_AUTH=true` opts into running open)
   - `MCP_TOKEN=""`, `MCP_PORT=3111`
+  - `MCP_ALLOWED_HOSTS=[]`, `MCP_ALLOWED_ORIGINS=[]` unless comma-separated env provided
   - `DB_PATH=./data/logs/ingress.db` (resolved from cwd)
   - `RETENTION_DAYS=0` (disabled)
   - `ALLOWED_ORIGINS=[]` unless comma-separated env provided
-- `ALLOWED_ORIGINS` parsing trims and filters empty entries; `"*"` is preserved as a normal entry and interpreted by `@usekamori/ingest`.
+- `ALLOWED_ORIGINS`, `MCP_ALLOWED_HOSTS`, and `MCP_ALLOWED_ORIGINS` parsing trims and filters empty entries; for `ALLOWED_ORIGINS`, `"*"` is preserved as a normal entry and interpreted by `@usekamori/ingest`.
+- `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` feed the MCP Streamable-HTTP transport's DNS-rebinding protection (`@usekamori/mcp`): when either is non-empty, requests whose `Host`/`Origin` is not listed are rejected.
 
 ## 4. Database Schema and Storage
 
@@ -115,7 +118,7 @@ Approximate blocking durations:
 
 Concurrency ceiling is roughly 100–200 simultaneous clients before tail latency becomes noticeable. The documented ~20 000 events/s batch throughput is a peak number measured without concurrent query load.
 
-The cloud path (`LibSqlAdapter`) is unaffected — it issues HTTP requests to a remote libSQL/Turso server and awaits a real async network response.
+The cloud path (`LibSqlAdapter`) is unaffected — it issues HTTP requests to a remote libSQL (sqld) server and awaits a real async network response.
 
 ### Tables and indexes
 
@@ -153,7 +156,8 @@ Core query functions in `db.ts` enforce these semantics:
   - with `after_id`: cursor mode (`id ASC`),
   - limit capped at 500.
 - `searchLogs`:
-  - FTS5 search with optional filters,
+  - FTS5 search with optional filters (`service`, `level`, `since`, `until`, `after_id`),
+  - `level` is an exact match on the indexed column — identical semantics to `queryLogs` (single level only),
   - same ordering split as `queryLogs`,
   - limit capped at 500.
 - `countLogs` / `countLogsFts`:

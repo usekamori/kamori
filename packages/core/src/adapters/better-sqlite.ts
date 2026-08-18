@@ -246,6 +246,23 @@ export class BetterSqliteAdapter implements DbAdapter {
     return this._prepare(sql).all(...args) as T[];
   }
 
+  /**
+   * Run an untrusted SELECT under `PRAGMA query_only`, so SQLite itself rejects
+   * any write the statement attempts (returns "attempt to write a readonly
+   * database"). better-sqlite3 is synchronous and single-connection, so
+   * toggling the pragma around this one call cannot interleave with other work;
+   * the `finally` restores write access even if the query throws.
+   */
+  async readonlyQuery<T = DbRow>(sql: string, args: unknown[] = []): Promise<T[]> {
+    await yieldToEventLoop();
+    this._db.pragma("query_only = ON");
+    try {
+      return this._prepare(sql).all(...args) as T[];
+    } finally {
+      this._db.pragma("query_only = OFF");
+    }
+  }
+
   async get<T = DbRow>(sql: string, args: unknown[] = []): Promise<T | null> {
     await yieldToEventLoop();
     const row = this._prepare(sql).get(...args);

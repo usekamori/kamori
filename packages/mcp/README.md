@@ -51,6 +51,8 @@ MCP_PORT=3111 node packages/mcp/dist/mcp.js
 | `DB_PATH`   | `./data/logs/ingress.db` | Path to the SQLite log database |
 | `MCP_PORT`  | `3111`                   | Streamable HTTP listen port     |
 | `MCP_TOKEN` | —                        | Bearer token for HTTP mode auth |
+| `MCP_ALLOWED_HOSTS`   | —              | Comma-separated `Host` allow-list for DNS-rebinding protection (e.g. `mcp.example.com,localhost:3111`). Empty = off |
+| `MCP_ALLOWED_ORIGINS` | —              | Comma-separated `Origin` allow-list. Empty = off. Set at least one of these to enable the check |
 
 ## Authentication
 
@@ -332,6 +334,7 @@ Point your client at the running HTTP server:
 
 - **stdio mode**: no token required — trust is inherited from the spawning process.
 - **Streamable HTTP mode**: set `MCP_TOKEN` env var. All requests must include `Authorization: Bearer <token>`. The `/health` endpoint is exempt.
+- **DNS-rebinding protection**: set `MCP_ALLOWED_HOSTS` and/or `MCP_ALLOWED_ORIGINS` to reject requests whose `Host`/`Origin` is not allow-listed. Recommended whenever the HTTP server is reachable from a browser context. Empty = disabled.
 
 ## Community vs Cloud behaviour
 
@@ -342,6 +345,10 @@ The MCP server always queries the **single shared SQLite database** at `DB_PATH`
 ### Cloud (multi-tenant)
 
 Each session's `Authorization: Bearer <api-key>` is an Ed25519 JWT. Every MCP tool call verifies the JWT and routes to the **correct per-project database** for that key. A missing or invalid token returns an explicit error — there is no silent fallback to a shared database.
+
+**Session-token binding**: a session is bound to a SHA-256 of the token that opened it. Every subsequent request (POST reuse / GET / DELETE) must present a token with the same hash (constant-time compare) or gets `401` — so knowing the `Mcp-Session-Id` alone is not enough to drive a session.
+
+**Proactive revocation**: the session also records the JWT `sub` (API key id); the session sweep closes any session whose key has been revoked or rotated (via the cloud adapter's `isRevoked`), rather than waiting for the inactivity TTL.
 
 **Session expiry**: When a cloud session is created, the server decodes the `exp` claim from the JWT and schedules a `transport.close()` at that exact moment. When the key expires the AI client receives a clean disconnect rather than a confusing mid-conversation error. The client can then reconnect with a new key.
 

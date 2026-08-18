@@ -23,6 +23,9 @@
 import { EventEmitter } from "node:events";
 import { KamoriClient } from "./client.js";
 import type { KamoriClientOptions } from "./client.js";
+// Side-effect import: registers the ambient-trace resolver on KamoriClient so
+// entries forwarded by this transport auto-attach the current trace_id.
+import "./trace.js";
 
 /**
  * Winston transport that forwards log entries to a Kamori ingest server.

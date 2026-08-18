@@ -31,6 +31,8 @@
 
 import { KamoriClient } from "./client.js";
 import type { KamoriClientOptions } from "./client.js";
+// Web-safe helpers only (no node:async_hooks) so this stays Edge-compatible.
+import { traceFromHeaders, generateTraceId } from "./trace-context.js";
 
 /** The shape of a Next.js-compatible request handler or middleware function. */
 type NextHandler = (req: Request) => Response | Promise<Response>;
@@ -92,6 +94,12 @@ export function withKamori(
     // may contain secrets, tokens, or PII.
     const path = new URL(req.url).pathname;
 
+    // Derive a trace id for this request: reuse an inbound W3C traceparent /
+    // x-request-id / x-correlation-id if present, otherwise generate one. This
+    // is what lets logs from this service join the same trace as its callers.
+    const trace_id =
+      traceFromHeaders((n) => req.headers.get(n))?.trace_id ?? generateTraceId();
+
     try {
       const response = await handler(req);
 
@@ -103,6 +111,7 @@ export function withKamori(
         path,
         status: response.status,
         duration_ms: Date.now() - start,
+        trace_id,
       });
 
       return response;
@@ -116,6 +125,7 @@ export function withKamori(
         path,
         error: err instanceof Error ? err.message : String(err),
         duration_ms: Date.now() - start,
+        trace_id,
       });
       throw err;
     }

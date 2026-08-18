@@ -33,13 +33,27 @@ Source entrypoints:
 
 ## 3. Runtime Architecture
 
-## 3.1 Bootstrap (`server.ts`)
+## 3.1 Bootstrap (`ingest.ts`)
 
 - loads env-derived `PORT`, `HOST`, `DB_PATH`.
+- runs the **auth-posture check** (`lib/startup-check.ts`, `checkIngestAuthPosture`) — see §4.1.
 - creates `defaultAdapters()` from `@usekamori/core`.
 - builds app via `buildServer(adapters)`.
 - calls `fastify.listen`.
 - exits process with code 1 on startup failures.
+
+### 4.1 Startup auth-posture check (`lib/startup-check.ts`)
+
+`checkIngestAuthPosture({ ingestToken, metricsToken, nodeEnv, host, cloudMode, allowNoAuth })`
+is a pure function that returns `{ warnings, fatal }`. The OSS entrypoint logs each
+warning and, when `fatal` is set, prints it and exits 1. Rules:
+
+- **Cloud mode** (`CLOUD_MODE=true`) — skipped entirely (auth is per-project JWT keys, not `INGEST_TOKEN`).
+- **Empty `INGEST_TOKEN`, `NODE_ENV=production`, networked host, `KAMORI_ALLOW_NO_AUTH` unset** → **fatal** (refuse to start). Prevents accidentally shipping an open, network-reachable server.
+- **Empty `INGEST_TOKEN` otherwise** (dev, or loopback, or `KAMORI_ALLOW_NO_AUTH=true`) → warning: the `/v1` API is unauthenticated.
+- **Empty `METRICS_TOKEN` on a networked host** → warning: `/metrics` is public.
+
+A host is "networked" when `HOST` is not `127.0.0.1` / `localhost` / `::1`.
 
 ## 3.2 App construction (`build-server.ts`)
 
@@ -142,12 +156,12 @@ POST /v1/ingest
      └── getProjectDbAdapter(projectId)
          ├── cache hit (15-min TTL, LRU cap 1000) → return cached LibSqlAdapter
          └── cache miss → getProject(pgPool, projectId)
-             ├── project not found              → null → 500
-             ├── project.dbUrl set              → LibSqlAdapter(project.dbUrl, TURSO_API_TOKEN)
-             ├── SQLD_HOST set                  → LibSqlAdapter(SQLD_HOST,
-             │                                      makeProjectToken(SQLD_JWT_KEY, slug),
-             │                                      namespace=slug)
-             └── neither                        → buildDbAdapter() fallback
+             ├── project not found              → null → 404
+             ├── project.dbUrl unset            → throw (no database provisioned)
+             └── project.dbUrl set              → LibSqlAdapter(project.dbUrl,
+                                                    scopedProjectToken(project.id))
+                                                    (namespace-scoped token; project id
+                                                     is the URL's first subdomain label)
   6. maxRowBytes = plugins.getMaxRowBytes(projectId)  ← plan-based limit from CloudBillingAdapter
   7. insertLogs(db, rows, receivedAt, maxRowBytes)  ← writes to THIS project's DB only
   8. CloudBillingAdapter.reportUsage(projectId, bytes, writtenRows)
@@ -187,6 +201,15 @@ Token scope notes:
 - Default adapter stack (`defaultAdapters`) wires `db = BetterSqliteAdapter(DB_PATH)`.
 - All ingest/query/export/delete/summary routes use this DB adapter directly.
 - Default DB path is `./data/logs/ingress.db` unless `DB_PATH` overrides it.
+
+### Route module layout (D3 split, 2026-07)
+
+`routes/v1.ts` is composition-only; implementations live in resource modules:
+`routes/shared.ts` (auth preHandler, resolveDb, counters, notification bus, helpers),
+`routes/ingest.ts` (/health, POST /ingest, POST /webhook/:provider),
+`routes/query.ts` (GET /logs, /search, /services, /summary, /logs/alert),
+`routes/stream.ts` (GET /stream), `routes/admin.ts` (GET /export, DELETE /logs).
+Test helpers remain re-exported from `v1.ts`. `route-inventory.test.ts` pins the endpoint set.
 
 ## 5. API Surface (`/v1`)
 
@@ -242,8 +265,14 @@ Token scope notes:
 
 - requires `q`.
 - `q` length max 1000 chars.
-- optional filters: `service`, `since`, `until`, `after_id`, `limit`.
+- optional filters: `service`, `level` (exact match, combines with FTS), `since`, `until`, `after_id`, `limit`.
 - response: `{ logs: LogRow[], count }`.
+
+## 5.4a `GET /v1/count` / `GET /v1/histogram` (added for A4)
+
+- `/count`: exact `countLogs` with optional `service`/`level`/`since`/`until` → `{ count }`.
+- `/histogram`: `histogramLogs` with `bucket` (`1m|5m|15m|1h|6h|1d`, default `1h`) + same filters → `{ histogram: [{ bucket, count }] }`.
+- Added so the cloud dashboard can read stats via this API instead of direct DB access.
 
 ## 5.5 `GET /v1/services`
 
@@ -307,7 +336,7 @@ Token scope notes:
 - provider verification (`lib/webhook.ts`):
   - `vercel`: HMAC-SHA1 via `x-vercel-signature`
   - `github`: HMAC-SHA256 via `x-hub-signature-256` (`sha256=<hex>`)
-  - `render`: `render-signature` (`t=<ts>,v1=<hex>`) with +/-300s replay window
+  - `render`: `render-signature` (`t=<ts>,v1=<hex>`), HMAC-SHA256 over `<t>.<body>` so the timestamp is authenticated, with a +/-300s replay window
   - unknown providers: pass-through when no configured secret
 - invalid signature -> `401`.
 - invalid JSON -> `400`.

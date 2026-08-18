@@ -100,6 +100,7 @@ const ALL_TOOLS = [
   "histogram",
   "trace_logs",
   "query_sql",
+  "find_related_traces",
 ] as const;
 
 // Tools tested individually in the ctx-propagation suite (long-poll, special args)
@@ -120,10 +121,10 @@ const TOOL_ARGS: Record<string, Record<string, unknown>> = {
 // ---------------------------------------------------------------------------
 
 describe("buildMcpServer — tool registration", () => {
-  it("registers exactly 13 tools", async () => {
+  it("registers exactly 14 tools", async () => {
     const { buildMcpServer } = await import("./build-mcp-server.js");
     buildMcpServer(makeAdapters());
-    expect(mockTool).toHaveBeenCalledTimes(13);
+    expect(mockTool).toHaveBeenCalledTimes(14);
   });
 
   it.each(ALL_TOOLS)("registers the '%s' tool", async (name) => {

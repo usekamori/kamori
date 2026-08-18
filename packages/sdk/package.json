@@ -12,6 +12,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
+    "./trace": "./dist/trace.js",
     "./pino": "./dist/pino.js",
     "./winston": "./dist/winston.js",
     "./browser": "./dist/browser.js",
@@ -26,6 +27,8 @@
     "build": "tsc -p ."
   },
   "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^1.28.0",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3"
   }

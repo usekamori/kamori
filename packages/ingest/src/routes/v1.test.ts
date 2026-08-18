@@ -931,8 +931,13 @@ describe("POST /v1/webhook/:provider", () => {
     "sha256=" + createHmac("sha256", secret).update(buf).digest("hex");
 
   /** Sign a body for Render (t=<ts>,v1=<hex>). */
-  const signRender = (secret: string, buf: Buffer) =>
-    `t=${Math.floor(Date.now() / 1000)},v1=${createHmac("sha256", secret).update(buf).digest("hex")}`;
+  const signRender = (secret: string, buf: Buffer) => {
+    const t = Math.floor(Date.now() / 1000);
+    // The signature covers `<timestamp>.<body>`, not the body alone, so the
+    // `t=` value is authenticated (see verifyWebhookSignature for render).
+    const signedPayload = Buffer.concat([Buffer.from(`${t}.`), buf]);
+    return `t=${t},v1=${createHmac("sha256", secret).update(signedPayload).digest("hex")}`;
+  };
 
   it("returns 400 for an unknown provider", async () => {
     const app = await buildApp();

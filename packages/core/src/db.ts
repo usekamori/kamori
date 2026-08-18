@@ -331,6 +331,38 @@ export async function queryLogs(
 }
 
 // ---------------------------------------------------------------------------
+// resolveCursorForTime
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves an ISO-8601 instant to a tail cursor for time-anchored tailing.
+ *
+ * Returns the largest log `id` strictly before `since`. Passing the result as
+ * `after_id` to queryLogs (or a tail loop) then yields rows with
+ * `received_at >= since` — inclusive of `since` and tie-safe, because every row
+ * at or after that instant has `id > cursor`. From that point tailing proceeds
+ * purely by the monotonic `id` cursor, so resumption stays exact even if a
+ * backwards clock adjustment made a later-id row's `received_at` earlier.
+ *
+ * Returns 0 when the table is empty or every row is at/after `since`, i.e. tail
+ * from the beginning.
+ *
+ * @param adapter - DbAdapter to use for database operations.
+ * @param since - ISO-8601 start instant (compared against received_at).
+ * @returns The starting `after_id` cursor (0 = from the beginning).
+ */
+export async function resolveCursorForTime(
+  adapter: DbAdapter,
+  since: string,
+): Promise<number> {
+  const rows = await adapter.query<{ cursor: number }>(
+    `SELECT COALESCE(MAX(id), 0) AS cursor FROM logs WHERE received_at < ?`,
+    [since],
+  );
+  return rows[0]?.cursor ?? 0;
+}
+
+// ---------------------------------------------------------------------------
 // getLogById
 // ---------------------------------------------------------------------------
 
@@ -559,7 +591,7 @@ export async function searchLogs(
   query: string,
   opts: Pick<
     QueryOptions,
-    "since" | "until" | "service" | "limit" | "after_id"
+    "since" | "until" | "service" | "level" | "limit" | "after_id"
   >,
 ): Promise<LogRow[]> {
   const conditions: string[] = ["logs_fts MATCH ?"];
@@ -576,6 +608,11 @@ export async function searchLogs(
   if (opts.service) {
     conditions.push("l.service = ?");
     params.push(opts.service);
+  }
+  // Exact match on the indexed level column — same semantics as queryLogs.
+  if (opts.level) {
+    conditions.push("l.level = ?");
+    params.push(opts.level);
   }
   // Cursor-based pagination: only return rows newer than the last seen id
   if (opts.after_id !== undefined) {

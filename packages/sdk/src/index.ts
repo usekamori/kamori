@@ -1,8 +1,22 @@
 export { KamoriClient, ScopedKamoriClient } from "./client.js";
 export type { KamoriClientOptions } from "./client.js";
 
-export { createKamoriStream } from "./pino.js";
+export { createKamoriStream, kamoriMixin } from "./pino.js";
 export { KamoriTransport } from "./winston.js";
+
+// Ambient trace context (Node). Importing this also registers the resolver that
+// makes KamoriClient.log auto-attach the current trace_id.
+export {
+  withTrace,
+  setTraceContext,
+  getTraceId,
+  generateTraceId,
+  generateSpanId,
+  parseTraceparent,
+  toTraceparent,
+  traceFromHeaders,
+} from "./trace.js";
+export type { TraceContext } from "./trace.js";
 
 import { KamoriClient } from "./client.js";
 import type { KamoriClientOptions } from "./client.js";

@@ -14,6 +14,7 @@ import {
   getLogById,
   queryByField,
   histogramLogs,
+  resolveCursorForTime,
 } from "@usekamori/core";
 
 export type ToolResult = { content: { type: "text"; text: string }[] };
@@ -70,6 +71,7 @@ export async function handleSearchLogs(
   args: {
     query: string;
     service?: string;
+    level?: string;
     since?: string;
     until?: string;
     limit?: number;
@@ -77,6 +79,7 @@ export async function handleSearchLogs(
 ): Promise<ToolResult> {
   const rows = await searchLogs(adapter, args.query, {
     service: args.service,
+    level: args.level,
     since: args.since,
     until: args.until,
     limit: args.limit,
@@ -141,27 +144,35 @@ export async function handleSummarizeErrors(
 export async function handleTailLogs(
   adapter: DbAdapter,
   args: {
-    after_id: number;
+    after_id?: number;
+    since?: string;
     query?: string;
     service?: string;
     level?: string;
     limit?: number;
   },
 ): Promise<ToolResult> {
+  // Precedence: explicit after_id wins; else resolve `since` once to a starting
+  // cursor; else start from the beginning (0).
+  const after_id =
+    args.after_id ??
+    (args.since ? await resolveCursorForTime(adapter, args.since) : 0);
+
   const rows = args.query
     ? await searchLogs(adapter, args.query, {
-        after_id: args.after_id,
+        after_id,
         service: args.service,
+        level: args.level,
         limit: args.limit ?? 50,
       })
     : await queryLogs(adapter, {
-        after_id: args.after_id,
+        after_id,
         service: args.service,
         level: args.level,
         limit: args.limit ?? 50,
       });
 
-  const last_id = rows.length ? rows[rows.length - 1].id : args.after_id;
+  const last_id = rows.length ? rows[rows.length - 1].id : after_id;
 
   const text = rows.length
     ? `${rows.length} new log(s). last_id=${last_id}\n\n${rows.map((r) => r.body).join("\n")}`
@@ -181,6 +192,36 @@ export async function handleGetLog(
   const row = await getLogById(adapter, args.id);
   const text = row ? row.body : `Log id=${args.id} not found.`;
   return { content: [{ type: "text", text }] };
+}
+
+// ---------------------------------------------------------------------------
+// find_related_traces
+// ---------------------------------------------------------------------------
+
+export async function handleFindRelatedTraces(
+  adapter: DbAdapter,
+  args: { log_id: number; limit?: number },
+): Promise<ToolResult> {
+  const row = await getLogById(adapter, args.log_id);
+  if (!row) {
+    return {
+      content: [{ type: "text", text: `Log id=${args.log_id} not found.` }],
+    };
+  }
+  if (!row.trace_id) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Log id=${args.log_id} has no trace_id, so it cannot be correlated ` +
+            `to other services. The log itself:\n${row.body}`,
+        },
+      ],
+    };
+  }
+  // Reuse trace_logs: every row sharing this trace_id, chronological order.
+  return handleTraceLogs(adapter, { trace_id: row.trace_id, limit: args.limit });
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +268,8 @@ export async function handleAlertSummary(
 export async function handleWatchLogs(
   adapter: DbAdapter,
   args: {
-    after_id: number;
+    after_id?: number;
+    since?: string;
     timeout_seconds?: number;
     service?: string;
     level?: string;
@@ -235,7 +277,11 @@ export async function handleWatchLogs(
   },
 ): Promise<ToolResult> {
   const deadline = Date.now() + (args.timeout_seconds ?? 15) * 1000;
-  let current_id = args.after_id;
+  // Resolve the starting cursor once, before the poll loop. Precedence:
+  // explicit after_id wins; else `since` → cursor; else start from current end (0).
+  let current_id =
+    args.after_id ??
+    (args.since ? await resolveCursorForTime(adapter, args.since) : 0);
 
   // Exponential backoff when no logs arrive: 1 s → 2 s → 4 s → 5 s (capped).
   // Resets to 1 s when new logs are found. Avoids hammering SQLite on idle watches.
@@ -427,9 +473,13 @@ export async function handleQuerySql(
   try {
     // Wrap in a subquery so any inner ORDER BY is preserved while still
     // enforcing the row cap without requiring the user to add LIMIT themselves.
-    const rows = await adapter.query<Record<string, unknown>>(
-      `SELECT * FROM (${sql}) LIMIT ${limit}`,
-    );
+    // Use the adapter's hard read-only path so a crafted statement cannot write
+    // even if it slips past the lexical checks above; fall back to query() only
+    // for adapters that don't implement it.
+    const wrapped = `SELECT * FROM (${sql}) LIMIT ${limit}`;
+    const rows = adapter.readonlyQuery
+      ? await adapter.readonlyQuery<Record<string, unknown>>(wrapped)
+      : await adapter.query<Record<string, unknown>>(wrapped);
     return {
       content: [
         {

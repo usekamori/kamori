@@ -117,10 +117,17 @@ Key properties:
 - Each HTTP session is isolated: buildMcpServer is called once per session
   with that session's bearer token. Concurrent AI clients with different API
   keys hit completely separate project databases.
+- The session is bound to its token: a SHA-256 of the bearer token is stored on
+  the session and every subsequent request (POST reuse / GET / DELETE) must
+  present a token with the same hash (constant-time compare) or receive 401.
+  Knowing the `Mcp-Session-Id` alone is not a credential.
 - The JWT is verified fresh on every tool call (resolveDb called per invocation).
   If a token expires mid-session, the next tool call throws a clean MCP error
   rather than silently returning stale/wrong data.
-- The adapter cache (5-min TTL in entrypoint) prevents Postgres round-trips
+- A revoked or rotated key proactively closes its sessions: the session stores
+  the JWT `sub` and the sweep closes any session whose `sub` is in the
+  revocation blocklist (via `adapters.mcp.isRevoked`).
+- The adapter cache (15-min TTL in entrypoint) prevents Postgres round-trips
   on every tool call within the same session.
 
 stdio mode (cloud):
@@ -162,9 +169,14 @@ Transport selection:
 - session map stores:
   - transport instance
   - `lastActivityAt` timestamp
+  - `tokenHash` — SHA-256 of the bearer token that opened the session (null in
+    OSS no-auth mode); used to bind every later request to the same token
+  - `sub` — JWT `sub` (API key id), used to close the session when the key is revoked
 - idle session TTL:
   - 1 hour inactivity expiry
   - sweep interval every 5 minutes
+  - the same sweep also closes sessions whose `sub` is revoked
+    (`adapters.mcp.isRevoked?.(sub)` — cloud only; OSS leaves `isRevoked` undefined)
 - on transport close: session removed from map.
 
 ## 4.4 Session expiry at JWT expiry
@@ -207,6 +219,32 @@ timer is set — the session lives until idle TTL or explicit DELETE.
   - `X-Frame-Options: DENY`
   - `Referrer-Policy: no-referrer`
   - `X-Permitted-Cross-Domain-Policies: none`
+
+## 4.6 Session-token binding, DNS-rebinding protection, and revocation sweep
+
+These harden the multi-tenant HTTP transport (all O(1) per request, no shared
+state — see `kamori-cloud/packages/entrypoint/SPECS.md` §5.4):
+
+- **Per-request token binding.** On session creation the bearer token is hashed
+  (SHA-256) and stored as `tokenHash`; `decodeJwtSub` records the `sub`. Every
+  reused request (POST with a known `Mcp-Session-Id`, GET, DELETE) recomputes
+  `sha256(bearerToken)` and `timingSafeEqual`s it against `tokenHash`; a mismatch
+  returns `401 { error: "unauthorized" }`. This is cheaper than re-verifying the
+  JWT signature (which `resolveDb` still does per tool call) and means the
+  session id alone cannot drive a session. Sessions with no bound token
+  (self-hosted no-auth) accept any request.
+- **DNS-rebinding protection.** The `StreamableHTTPServerTransport` is created
+  with `enableDnsRebindingProtection` plus `allowedHosts` / `allowedOrigins`,
+  populated from `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`. When either list is
+  non-empty the transport rejects requests whose `Host`/`Origin` is not listed —
+  blocking a browser on a malicious origin from reaching a locally/internally
+  bound MCP server. Empty lists (default) disable the check; server-to-server
+  clients send no `Origin` and connect via the real host, so are unaffected.
+- **Proactive revocation.** The 5-minute session sweep closes any session whose
+  stored `sub` is revoked (`adapters.mcp.isRevoked`), so a revoked/rotated key
+  kills its live sessions within the sweep interval rather than lingering to the
+  1-hour inactivity TTL. Consistent with the 15-minute revocation-blocklist
+  refresh window.
 
 ## 4. Authentication Model
 
@@ -278,7 +316,7 @@ All handlers return MCP text content:
 ## 7.2 `search_logs`
 
 - FTS via `searchLogs`.
-- supports `query`, optional `service/since/until/limit`.
+- supports `query`, optional `service/level/since/until/limit` (`level` = exact match on the indexed column).
 - empty result message: `"No logs matched the search query."`
 
 ## 7.3 `list_services`
@@ -297,7 +335,7 @@ All handlers return MCP text content:
 ## 7.5 `tail_logs`
 
 - cursor polling by `after_id`.
-- when `query` provided: uses FTS search path.
+- when `query` provided: uses FTS search path (`level` filter applies there too).
 - otherwise: uses normal filtered query path.
 - returns:
   - `<n> new log(s). last_id=<id>` + bodies, or
@@ -350,12 +388,15 @@ All handlers return MCP text content:
 
 - `POST`:
   - without session header -> create new session and ingest/transport.
-  - with valid session header -> reuse existing transport.
+  - with valid session header -> reuse existing transport (token must match the
+    session's `tokenHash`, else `401 unauthorized`).
   - with unknown session header -> `404 session not found`.
 - `GET`:
-  - requires valid `Mcp-Session-Id`, else `400 missing or invalid session id`.
+  - requires valid `Mcp-Session-Id`, else `400 missing or invalid session id`;
+    token must match the session's `tokenHash`, else `401 unauthorized`.
 - `DELETE`:
-  - requires valid session, closes/removes it and returns `{ ok: true }`.
+  - requires valid session and a matching token (`401` on mismatch); closes/
+    removes it and returns `{ ok: true }`.
   - unknown session -> `404 session not found`.
 
 Unmatched routes -> `404`.
@@ -398,7 +439,8 @@ Unmatched routes -> `404`.
 
 ## 7.13 `query_sql`
 
-- accepts only `SELECT` statements (validated via `/^\s*select\b/i`).
+- **Hard read-only execution**: the wrapped query is run via `adapter.readonlyQuery` when available (`PRAGMA query_only` on better-sqlite3, a read-only transaction on libSQL), so a crafted statement **cannot write** even if it slips past the lexical checks below. Falls back to `query` only for adapters that don't implement it.
+- accepts only `SELECT` statements (validated via `/^\s*select\b/i`) — defence-in-depth.
 - rejects queries containing semicolons (prevents statement stacking).
 - **table allowlist**: extracts all `FROM`/`JOIN` table references via regex and rejects any name not in `{ "logs", "logs_fts" }`. Subquery parentheses (`FROM (SELECT ...)`) produce no match and pass through cleanly. System tables (`sqlite_master`, `sqlite_sequence`, etc.) are rejected before the query reaches the adapter.
 - wraps user SQL in `SELECT * FROM (<sql>) LIMIT <limit>` to enforce the row cap while preserving inner `ORDER BY`.
@@ -415,6 +457,7 @@ Unmatched routes -> `404`.
 - tool composition works against real SQLite adapter (integration tests).
 - alert/anomaly counts are internally consistent in integrated flows.
 - `decodeJwtExpiry`: returns correct `exp` for valid JWTs; `null` for non-JWTs, missing/wrong-typed `exp`, malformed base64, empty string.
+- `decodeJwtSub`: returns the `sub` (API key id) for valid JWTs; `null` for non-JWTs, missing/wrong-typed `sub`, malformed base64, empty string.
 - `scheduleSessionExpiry`: no timer for non-JWT tokens; no timer when `exp` absent or already expired; no timer when delay exceeds 32-bit limit (90-day keys); transport closed and `onClose` called at exact expiry millisecond (fake timers); `onClose` called even when `transport.close()` rejects.
 
 ## 11. Non-Goals / Out of Scope

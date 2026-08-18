@@ -48,6 +48,22 @@ const QUEUE_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 type DropHandler = (events: Record<string, unknown>[]) => void;
 
 /**
+ * Resolver that supplies the ambient trace context (AsyncLocalStorage /
+ * OpenTelemetry). Registered by the Node-only `./trace` module on import so the
+ * browser build never pulls Node-only dependencies. Null until registered.
+ */
+type TraceResolver = () => Record<string, unknown> | undefined;
+let traceResolver: TraceResolver | null = null;
+
+/**
+ * @internal Registered by `./trace` on import — do not call directly.
+ * Injects the ambient-trace resolver consulted by {@link KamoriClient.log}.
+ */
+export function _setTraceResolver(fn: TraceResolver | null): void {
+  traceResolver = fn;
+}
+
+/**
  * All KamoriClient instances that opted into flushOnExit.
  * Handlers are registered once and iterate over every registered client,
  * so multiple instances all get flushed on exit.
@@ -124,10 +140,18 @@ export class KamoriClient {
    * line number are appended as `_source`.
    */
   log(event: Record<string, unknown>): void {
+    // Auto-attach ambient trace context (AsyncLocalStorage / OpenTelemetry span)
+    // when the caller has not set trace_id explicitly. User fields always win.
+    let ev = event;
+    if (traceResolver && ev.trace_id === undefined) {
+      const ctx = traceResolver();
+      if (ctx) ev = { ...ctx, ...event };
+    }
+
     // Optionally annotate the event with the call-site location.
     const eventToBuffer = this.shouldCaptureSource()
-      ? { ...event, _source: this.getSource() }
-      : event;
+      ? { ...ev, _source: this.getSource() }
+      : ev;
 
     this.buffer.push(eventToBuffer);
 

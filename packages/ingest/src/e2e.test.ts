@@ -543,6 +543,76 @@ describe("E2E: NDJSON live stream", () => {
     expect(typeof row.body).toBe("string");
   }, 5000);
 
+  /** Open /v1/stream, capture status, the X-Kamori-Start-Id header and NDJSON lines. */
+  function openStream(
+    query: Record<string, string>,
+  ): Promise<{ status?: number; startId?: string; lines: string[] }> {
+    const qs = new URLSearchParams(query).toString();
+    return new Promise((resolve, reject) => {
+      const lines: string[] = [];
+      let buf = "";
+      let status: number | undefined;
+      let startId: string | undefined;
+      const req = http.get(
+        {
+          hostname: new URL(baseUrl).hostname,
+          port: new URL(baseUrl).port,
+          path: `/v1/stream?${qs}`,
+          headers: { authorization: `Bearer ${TOKEN}` },
+        },
+        (res) => {
+          status = res.statusCode;
+          startId = res.headers["x-kamori-start-id"] as string | undefined;
+          res.on("data", (chunk: Buffer) => {
+            buf += chunk.toString();
+            const parts = buf.split("\n");
+            buf = parts.pop()!;
+            lines.push(...parts.filter(Boolean));
+          });
+          res.on("end", () => resolve({ status, startId, lines }));
+          res.on("error", () => resolve({ status, startId, lines }));
+        },
+      );
+      req.on("error", (err) => {
+        if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") reject(err);
+        else resolve({ status, startId, lines });
+      });
+      // Collect for a short window, then close.
+      setTimeout(() => {
+        req.destroy();
+        resolve({ status, startId, lines });
+      }, 800);
+    });
+  }
+
+  it("applies `since`: a far-future anchor suppresses all output", async () => {
+    await ingestHTTP([
+      { service: "since-svc", level: "info", seq: 1 },
+      { service: "since-svc", level: "info", seq: 2 },
+    ]);
+
+    // Far-future `since` → cursor resolves to the current max id, so nothing
+    // newer exists and no rows stream. (Node defers headers until the first
+    // byte on an empty stream, so the start-id header is asserted in the
+    // data-bearing precedence test below; nonzero cursor resolution is covered
+    // by the resolveCursorForTime unit tests.)
+    const future = await openStream({ since: "2999-01-01T00:00:00.000Z" });
+    expect(future.lines.length).toBe(0);
+  }, 5000);
+
+  it("after_id takes precedence over since, and echoes X-Kamori-Start-Id", async () => {
+    await ingestHTTP([{ service: "prec-svc", level: "info", seq: 1 }]);
+
+    // after_id=0 wins over a far-future since → header is 0 and rows stream.
+    const res = await openStream({
+      after_id: "0",
+      since: "2999-01-01T00:00:00.000Z",
+    });
+    expect(res.status).toBe(200);
+    expect(res.startId).toBe("0");
+    expect(res.lines.length).toBeGreaterThanOrEqual(1);
+  }, 5000);
+
   it("delivers a log event-driven (EventEmitter wakeup) without waiting for the heartbeat", async () => {
     // Open the stream first with no pre-existing data.
     // The log is ingested AFTER the connection is established, so it must be

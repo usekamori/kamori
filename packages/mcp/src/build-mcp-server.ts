@@ -21,6 +21,7 @@ import {
   handleSummarizeErrors,
   handleTailLogs,
   handleGetLog,
+  handleFindRelatedTraces,
   handleAlertSummary,
   handleWatchLogs,
   handleAnomalyHint,
@@ -79,6 +80,10 @@ export function buildMcpServer(
           'Full-text search query, e.g. "connection refused" OR timeout',
         ),
       service: z.string().optional().describe("Narrow to a specific service"),
+      level: z
+        .string()
+        .optional()
+        .describe("Narrow to a log level (exact match, e.g. error)"),
       since: z.string().optional().describe("ISO8601 start time"),
       until: z.string().optional().describe("ISO8601 end time"),
       limit: z
@@ -132,13 +137,20 @@ export function buildMcpServer(
    */
   server.tool(
     "tail_logs",
-    "Fetch log entries newer than a given id. Returns results oldest-first — ideal for live tailing. Pass the returned last_id as after_id on the next call. Optionally scope results with a full-text query.",
+    "Fetch log entries newer than a given id. Returns results oldest-first — ideal for live tailing. Pass the returned last_id as after_id on the next call. Provide after_id or since or neither. Optionally scope results with a full-text query.",
     {
       after_id: z
         .number()
         .int()
+        .optional()
         .describe(
-          "Return only logs with id greater than this. Pass 0 to start from the beginning.",
+          "Return only logs with id greater than this. Pass 0 (or omit) to start from the beginning. Takes precedence over since.",
+        ),
+      since: z
+        .string()
+        .optional()
+        .describe(
+          "ISO8601 start time, e.g. 2026-01-01T00:00:00Z. Used only when after_id is omitted: resolves once to a starting cursor, then tailing continues by id. Anchors on received_at (server ingest time).",
         ),
       query: z
         .string()
@@ -225,13 +237,20 @@ export function buildMcpServer(
    */
   server.tool(
     "watch_logs",
-    "Long-poll for new log entries. Polls every 500ms until new logs arrive or timeout_seconds elapses. Pass the returned last_id as after_id on the next call to continue tailing.",
+    "Long-poll for new log entries. Polls every 500ms until new logs arrive or timeout_seconds elapses. Pass the returned last_id as after_id on the next call to continue tailing. Provide after_id or since or neither.",
     {
       after_id: z
         .number()
         .int()
+        .optional()
         .describe(
-          "Return only logs newer than this id. Use 0 to start from current end.",
+          "Return only logs newer than this id. Use 0 (or omit) to start from current end. Takes precedence over since.",
+        ),
+      since: z
+        .string()
+        .optional()
+        .describe(
+          "ISO8601 start time. Used only when after_id is omitted: resolves once to a starting cursor before polling begins, then continues by id. Anchors on received_at (server ingest time).",
         ),
       timeout_seconds: z
         .number()
@@ -387,6 +406,34 @@ export function buildMcpServer(
     async (args) => {
       const db = await adapters.mcp.resolveDb(ctx);
       return handleTraceLogs(db, args);
+    },
+  );
+
+  /**
+   * find_related_traces — jump from a single log to its whole distributed trace.
+   *
+   * Looks up the log's trace_id, then returns every row sharing it in
+   * chronological order — the "click a log → see the whole trace" shortcut.
+   */
+  server.tool(
+    "find_related_traces",
+    "Given a single log entry's id, return every log that shares its trace_id in chronological order — the full request chain across services. Use this to jump from one log line to its entire distributed trace.",
+    {
+      log_id: z
+        .number()
+        .int()
+        .describe("Numeric id of the log to expand into its full distributed trace"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max rows to return (default 200)"),
+    },
+    async (args) => {
+      const db = await adapters.mcp.resolveDb(ctx);
+      return handleFindRelatedTraces(db, args);
     },
   );
 

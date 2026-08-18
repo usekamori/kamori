@@ -2,6 +2,26 @@
  * Pure scaffold helpers and content generators for `kamori` CLI.
  */
 
+import { randomBytes } from "node:crypto";
+
+/**
+ * Generate a strong random bearer token (URL-safe, ~32 chars). Used to secure a
+ * scaffolded instance by default so "open to the network" is never the accidental
+ * default — the token is written to `.env` and echoed in the setup output.
+ */
+export function generateToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+/**
+ * A user's token decision from the interactive prompts:
+ *   "generate"      — mint a random token (the default)
+ *   "disable"       — run without auth (empty token)
+ *   { value: "..." } — use this explicit value ("" also disables)
+ * `undefined` (non-interactive) resolves to "generate" unless a flag overrides.
+ */
+export type TokenChoice = "generate" | "disable" | { value: string };
+
 /** Clone / build Kamori from GitHub (non-Docker path). */
 export const KAMORI_GIT_URL = "https://github.com/usekamori/kamori.git";
 export const KAMORI_GIT_REF = "main";
@@ -25,6 +45,10 @@ export interface CliFlags {
   noMcp?: boolean;
   /** When true, scaffold Docker Compose + image-based run docs. */
   docker?: boolean;
+  /** Explicitly run the ingest API without auth (empty INGEST_TOKEN). */
+  noToken?: boolean;
+  /** Explicitly run MCP HTTP without auth (empty MCP_TOKEN). */
+  noMcpToken?: boolean;
   yes: boolean;
 }
 
@@ -51,6 +75,10 @@ export function parseArgsFrom(argv: string[]): CliFlags {
       result.yes = true;
     } else if (arg === "--no-mcp") {
       result.noMcp = true;
+    } else if (arg === "--no-token") {
+      result.noToken = true;
+    } else if (arg === "--no-mcp-token") {
+      result.noMcpToken = true;
     } else if (arg === "--docker") {
       result.docker = true;
     } else if (arg === "--log-token" && argv[i + 1]) {
@@ -70,26 +98,41 @@ export function parseArgsFrom(argv: string[]): CliFlags {
   return result;
 }
 
-export function resolveLogToken(
-  flags: CliFlags,
-  interactiveLogTokenSet = false,
-  interactiveLogToken?: string,
-): string {
-  if (flags.logToken !== undefined) return flags.logToken.trim();
-  if (!interactiveLogTokenSet) return "";
-  return interactiveLogToken?.trim() ?? "";
+/** Resolve a token choice to a concrete value, or a freshly generated one. */
+function resolveChoice(choice: TokenChoice | undefined): string {
+  if (choice === "disable") return "";
+  if (choice && typeof choice === "object") return choice.value.trim();
+  // "generate" or undefined (non-interactive default) → mint a token.
+  return generateToken();
 }
 
+/**
+ * Resolve the INGEST_TOKEN. Precedence: `--no-token` (disable) → `--log-token`
+ * value → interactive choice → **generate by default**. Generating by default
+ * means a scaffolded server is authenticated out of the box.
+ */
+export function resolveLogToken(
+  flags: CliFlags,
+  interactive?: TokenChoice,
+): string {
+  if (flags.noToken) return "";
+  if (flags.logToken !== undefined) return flags.logToken.trim();
+  return resolveChoice(interactive);
+}
+
+/**
+ * Resolve the MCP_TOKEN. Empty when MCP is disabled. Otherwise: `--no-mcp-token`
+ * (disable) → `--mcp-token` value → interactive choice → generate by default.
+ */
 export function resolveMcpToken(
   mcp: boolean,
   flags: CliFlags,
-  interactiveMcpTokenSet = false,
-  interactiveMcpToken: string | undefined,
+  interactive?: TokenChoice,
 ): string {
   if (!mcp) return "";
+  if (flags.noMcpToken) return "";
   if (flags.mcpToken !== undefined) return flags.mcpToken.trim();
-  if (!interactiveMcpTokenSet) return "";
-  return interactiveMcpToken?.trim() ?? "";
+  return resolveChoice(interactive);
 }
 
 export function resolveAllowedOrigins(

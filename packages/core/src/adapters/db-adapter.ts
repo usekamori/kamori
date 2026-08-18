@@ -21,6 +21,21 @@ export interface DbAdapter {
   /** Execute a SELECT, return the first row or null. */
   get<T = DbRow>(sql: string, args?: unknown[]): Promise<T | null>;
   /**
+   * Execute an untrusted SELECT under a hard read-only guarantee.
+   *
+   * Unlike `query`, which will happily run any statement, this MUST prevent the
+   * statement from performing any write at the database level — not by parsing
+   * the SQL, but structurally:
+   * - BetterSqliteAdapter wraps the call in `PRAGMA query_only`.
+   * - LibSqlAdapter runs it inside a read-only transaction.
+   *
+   * Used by the MCP `query_sql` escape hatch so a crafted statement cannot
+   * mutate data even if it slips past the tool's lexical checks. Optional so
+   * older adapters keep working; callers fall back to `query` when it is absent
+   * (with the lexical checks as their only guard).
+   */
+  readonlyQuery?<T = DbRow>(sql: string, args?: unknown[]): Promise<T[]>;
+  /**
    * Execute multiple DML statements as a single atomic transaction.
    *
    * **Contract (MUST be honoured by all implementations):**

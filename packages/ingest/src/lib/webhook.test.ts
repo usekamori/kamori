@@ -161,14 +161,20 @@ describe("verifyWebhookSignature — github", () => {
 // Render — HMAC-SHA256, header: render-signature (format: t=<ts>,v1=<hex>)
 // ---------------------------------------------------------------------------
 
+/** Render signs the timestamped payload `<t>.<body>`, so the `t=` value is authenticated. */
+function signRender(secret: string, ts: number, b: Buffer): string {
+  const payload = Buffer.concat([Buffer.from(`${ts}.`), b]);
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
+
 describe("verifyWebhookSignature — render", () => {
   it("returns true when no secret is configured", () => {
     expect(verifyWebhookSignature("render", body, {}, {})).toBe(true);
   });
 
-  it("returns true for a valid v1 signature", () => {
-    const hex = sign("sha256", secret, body);
-    const sig = `t=${Math.floor(Date.now() / 1000)},v1=${hex}`;
+  it("returns true for a valid v1 signature over `<t>.<body>`", () => {
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = `t=${ts},v1=${signRender(secret, ts, body)}`;
     expect(
       verifyWebhookSignature(
         "render",
@@ -179,9 +185,37 @@ describe("verifyWebhookSignature — render", () => {
     ).toBe(true);
   });
 
-  it("returns false for a wrong v1 value", () => {
-    const hex = "a".repeat(64); // wrong but right length
-    const sig = `t=1712000000,v1=${hex}`;
+  it("returns false for a wrong v1 value (fresh timestamp so the window passes)", () => {
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = `t=${ts},v1=${"a".repeat(64)}`;
+    expect(
+      verifyWebhookSignature(
+        "render",
+        body,
+        { "render-signature": sig },
+        { WEBHOOK_SECRET_RENDER: secret }
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a replay with an altered timestamp (timestamp is authenticated)", () => {
+    const ts = Math.floor(Date.now() / 1000);
+    // Signature minted for `ts`, but the header presents a different (still-fresh)
+    // timestamp. Because the signed payload includes the timestamp, this fails.
+    const sig = `t=${ts + 1},v1=${signRender(secret, ts, body)}`;
+    expect(
+      verifyWebhookSignature(
+        "render",
+        body,
+        { "render-signature": sig },
+        { WEBHOOK_SECRET_RENDER: secret }
+      )
+    ).toBe(false);
+  });
+
+  it("returns false for a stale timestamp outside the 5-minute window", () => {
+    const ts = Math.floor(Date.now() / 1000) - 600; // 10 minutes ago
+    const sig = `t=${ts},v1=${signRender(secret, ts, body)}`;
     expect(
       verifyWebhookSignature(
         "render",
@@ -199,7 +233,7 @@ describe("verifyWebhookSignature — render", () => {
   });
 
   it("returns false when v1= part is absent from the header", () => {
-    const sig = "t=1712000000,v0=something";
+    const sig = `t=${Math.floor(Date.now() / 1000)},v0=something`;
     expect(
       verifyWebhookSignature(
         "render",
@@ -211,8 +245,8 @@ describe("verifyWebhookSignature — render", () => {
   });
 
   it("returns false when the body has been tampered", () => {
-    const hex = sign("sha256", secret, body);
-    const sig = `t=1712000000,v1=${hex}`;
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = `t=${ts},v1=${signRender(secret, ts, body)}`;
     const tampered = Buffer.from(JSON.stringify({ event: "tampered" }));
     expect(
       verifyWebhookSignature(

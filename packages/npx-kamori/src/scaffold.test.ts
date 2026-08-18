@@ -4,6 +4,7 @@ import {
   DOCS_CONFIGURATION_URL,
   dockerCompose,
   dotenv,
+  generateToken,
   gitignore,
   mcpConfig,
   npmSafeName,
@@ -101,6 +102,15 @@ describe("parseArgsFrom", () => {
     });
   });
 
+  it("parses the token opt-out flags", () => {
+    expect(parseArgsFrom(["proj", "--no-token", "--no-mcp-token"])).toEqual({
+      dirName: "proj",
+      yes: false,
+      noToken: true,
+      noMcpToken: true,
+    });
+  });
+
   it("ignores unknown flags per spec", () => {
     expect(parseArgsFrom(["--unknown", "dir"])).toEqual({
       yes: false,
@@ -116,37 +126,61 @@ describe("parseArgsFrom", () => {
   });
 });
 
+describe("generateToken", () => {
+  it("produces a non-empty URL-safe token", () => {
+    const t = generateToken();
+    expect(t.length).toBeGreaterThanOrEqual(24);
+    expect(t).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("produces a different token each call", () => {
+    expect(generateToken()).not.toBe(generateToken());
+  });
+});
+
 describe("resolveLogToken", () => {
-  it("prefers the CLI flag over interactive", () => {
-    expect(
-      resolveLogToken({ yes: true, logToken: "  tok  " }, true, "ignored"),
-    ).toBe("tok");
+  it("prefers the CLI flag over an interactive choice", () => {
+    expect(resolveLogToken({ yes: true, logToken: "  tok  " }, "generate")).toBe("tok");
   });
 
-  it("returns interactive value when opted in", () => {
-    expect(resolveLogToken({ yes: true }, true, "  ab  ")).toBe("ab");
+  it("returns the interactive value when the user enters their own", () => {
+    expect(resolveLogToken({ yes: true }, { value: "  ab  " })).toBe("ab");
   });
 
-  it("returns empty when non-interactive and no flag", () => {
-    expect(resolveLogToken({ yes: true }, false)).toBe("");
+  it("generates a token by default when no flag or choice is given", () => {
+    const t = resolveLogToken({ yes: true });
+    expect(t).not.toBe("");
+    expect(t).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("generates when the interactive choice is 'generate'", () => {
+    expect(resolveLogToken({ yes: true }, "generate")).not.toBe("");
+  });
+
+  it("disables (empty) when the interactive choice is 'disable'", () => {
+    expect(resolveLogToken({ yes: true }, "disable")).toBe("");
+  });
+
+  it("disables (empty) with --no-token, overriding the default generation", () => {
+    expect(resolveLogToken({ yes: true, noToken: true })).toBe("");
   });
 });
 
 describe("resolveMcpToken", () => {
   it("returns empty when MCP is disabled", () => {
-    expect(resolveMcpToken(false, { yes: true, mcpToken: "x" }, false, "y")).toBe(
-      "",
-    );
+    expect(resolveMcpToken(false, { yes: true, mcpToken: "x" }, "generate")).toBe("");
   });
 
   it("prefers the CLI flag", () => {
-    expect(
-      resolveMcpToken(true, { yes: true, mcpToken: "cli" }, true, "interactive"),
-    ).toBe("cli");
+    expect(resolveMcpToken(true, { yes: true, mcpToken: "cli" }, "generate")).toBe("cli");
   });
 
-  it("returns empty in non-interactive mode without flag", () => {
-    expect(resolveMcpToken(true, { yes: true }, false, undefined)).toBe("");
+  it("generates a token by default when MCP is enabled and no flag/choice", () => {
+    expect(resolveMcpToken(true, { yes: true })).not.toBe("");
+  });
+
+  it("disables (empty) with --no-mcp-token", () => {
+    expect(resolveMcpToken(true, { yes: true, noMcpToken: true })).toBe("");
   });
 });
 

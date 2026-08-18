@@ -15,20 +15,47 @@ import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { KamoriAdapters } from "@usekamori/core";
-import { MCP_TOKEN, MCP_PORT } from "@usekamori/core";
+import {
+  MCP_TOKEN,
+  MCP_PORT,
+  MCP_ALLOWED_HOSTS,
+  MCP_ALLOWED_ORIGINS,
+} from "@usekamori/core";
 import { buildMcpServer } from "./build-mcp-server.js";
+
+/** SHA-256 digest of a string, as a fixed 32-byte buffer. */
+function sha256(s: string): Buffer {
+  return createHash("sha256").update(s).digest();
+}
 
 /** Timing-safe string comparison to prevent token oracle attacks. */
 function safeCompare(a: string, b: string): boolean {
-  const ha = createHash("sha256").update(a).digest();
-  const hb = createHash("sha256").update(b).digest();
-  return timingSafeEqual(ha, hb);
+  return timingSafeEqual(sha256(a), sha256(b));
 }
 
 /** Extract a bearer token from an Authorization header value. */
 function extractBearer(authHeader: string | string[] | undefined): string {
   const raw = Array.isArray(authHeader) ? authHeader[0] : (authHeader ?? "");
   return raw.startsWith("Bearer ") ? raw.slice(7) : "";
+}
+
+/**
+ * Decode the `sub` claim (API key id) from a JWT without verifying the
+ * signature. Used to bind a session to its key so the session can be closed when
+ * that key is revoked/rotated. Returns null for non-JWTs (e.g. a plain
+ * MCP_TOKEN bearer) or malformed tokens.
+ */
+export function decodeJwtSub(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -124,13 +151,39 @@ export async function startMcp(adapters: KamoriAdapters): Promise<void> {
   interface SessionEntry {
     transport: StreamableHTTPServerTransport;
     lastActivityAt: number;
+    /**
+     * SHA-256 of the bearer token that opened this session. Every subsequent
+     * request must present a token with the same hash, so knowing the session id
+     * alone is not enough to drive the session. Null when the session was opened
+     * without a token (self-hosted no-auth mode).
+     */
+    tokenHash: Buffer | null;
+    /** JWT `sub` (API key id) — used to close the session when the key is revoked. */
+    sub: string | null;
   }
   const sessions = new Map<string, SessionEntry>();
+
+  /**
+   * True when `token` is the one bound to this session (constant-time compare on
+   * a precomputed hash — cheaper than re-verifying the JWT signature, which the
+   * McpAdapter still does on every tool call). Sessions with no bound token
+   * (self-hosted no-auth) accept any request.
+   */
+  function tokenMatchesSession(entry: SessionEntry, token: string): boolean {
+    if (!entry.tokenHash) return true;
+    return timingSafeEqual(sha256(token), entry.tokenHash);
+  }
 
   setInterval(() => {
     const now = Date.now();
     for (const [id, entry] of sessions) {
-      if (now - entry.lastActivityAt > SESSION_TTL_MS) {
+      const expired = now - entry.lastActivityAt > SESSION_TTL_MS;
+      // Proactively drop sessions whose key was revoked or rotated, so a
+      // revoked key cannot keep an open session alive until its inactivity TTL.
+      // Runs against the adapter's in-memory blocklist (cloud); no-op OSS.
+      const revoked =
+        entry.sub != null && adapters.mcp.isRevoked?.(entry.sub) === true;
+      if (expired || revoked) {
         entry.transport.close().catch(() => {});
         sessions.delete(id);
       }
@@ -213,6 +266,13 @@ export async function startMcp(adapters: KamoriAdapters): Promise<void> {
 
           if (sessionId && sessions.has(sessionId)) {
             const entry = sessions.get(sessionId)!;
+            // Re-bind the session to its token: the Mcp-Session-Id alone must not
+            // grant access — the caller must present the same key each request.
+            if (!tokenMatchesSession(entry, bearerToken)) {
+              res.writeHead(401, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "unauthorized" }));
+              return;
+            }
             entry.lastActivityAt = Date.now();
             transport = entry.transport;
           } else if (!sessionId) {
@@ -220,10 +280,23 @@ export async function startMcp(adapters: KamoriAdapters): Promise<void> {
             // token context. The McpAdapter uses the token to resolve the correct
             // project DB (cloud) or ignores it (OSS / LocalDbMcpAdapter).
             const sessionServer = buildMcpServer(adapters, bearerToken);
+            const sessionTokenHash = bearerToken ? sha256(bearerToken) : null;
+            const sessionSub = bearerToken ? decodeJwtSub(bearerToken) : null;
             transport = new StreamableHTTPServerTransport({
               sessionIdGenerator: () => randomUUID(),
+              // DNS-rebinding protection: reject requests whose Host/Origin is
+              // not allow-listed. Off unless MCP_ALLOWED_HOSTS/ORIGINS are set.
+              enableDnsRebindingProtection:
+                MCP_ALLOWED_HOSTS.length > 0 || MCP_ALLOWED_ORIGINS.length > 0,
+              allowedHosts: MCP_ALLOWED_HOSTS,
+              allowedOrigins: MCP_ALLOWED_ORIGINS,
               onsessioninitialized: (id) => {
-                sessions.set(id, { transport, lastActivityAt: Date.now() });
+                sessions.set(id, {
+                  transport,
+                  lastActivityAt: Date.now(),
+                  tokenHash: sessionTokenHash,
+                  sub: sessionSub,
+                });
               },
             });
             transport.onclose = () => {
@@ -265,6 +338,11 @@ export async function startMcp(adapters: KamoriAdapters): Promise<void> {
             return;
           }
           const entry = sessions.get(sessionId)!;
+          if (!tokenMatchesSession(entry, bearerToken)) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+          }
           entry.lastActivityAt = Date.now();
           await entry.transport.handleRequest(req, res);
           return;
@@ -277,6 +355,11 @@ export async function startMcp(adapters: KamoriAdapters): Promise<void> {
             return;
           }
           const entry = sessions.get(sessionId)!;
+          if (!tokenMatchesSession(entry, bearerToken)) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+          }
           await entry.transport.close();
           sessions.delete(sessionId);
           res.writeHead(200, { "Content-Type": "application/json" });
