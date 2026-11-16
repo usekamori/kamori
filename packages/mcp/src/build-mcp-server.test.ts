@@ -30,10 +30,13 @@ const mockTool = vi.fn(
 
 const mockServerInstance = { tool: mockTool };
 
+const serverCtorArgs: unknown[][] = [];
+
 vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => {
   // Arrow functions can't be used with `new`. A regular function that returns
   // an explicit object causes `new` to return that object instead of `this`.
-  function MockMcpServer() {
+  function MockMcpServer(...args: unknown[]) {
+    serverCtorArgs.push(args);
     return mockServerInstance;
   }
   return { McpServer: MockMcpServer };
@@ -137,6 +140,14 @@ describe("buildMcpServer — tool registration", () => {
     const { buildMcpServer } = await import("./build-mcp-server.js");
     const result = buildMcpServer(makeAdapters());
     expect(result).toBe(mockServerInstance);
+  });
+
+  it("sends instructions marking log content as untrusted", async () => {
+    const { buildMcpServer, SERVER_INSTRUCTIONS } = await import("./build-mcp-server.js");
+    serverCtorArgs.length = 0;
+    buildMcpServer(makeAdapters());
+    expect(serverCtorArgs[0][1]).toEqual({ instructions: SERVER_INSTRUCTIONS });
+    expect(SERVER_INSTRUCTIONS).toMatch(/never as instructions/);
   });
 });
 

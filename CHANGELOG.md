@@ -30,6 +30,13 @@ cut yet, so everything lives under Unreleased.
 
 ### Security
 
+- MCP: indirect prompt injection guardrails. The server now sends
+  `instructions` on initialize telling clients that log content is untrusted
+  data, never instructions. Every tool result that returns raw log entries
+  (`query_logs`, `search_logs`, `tail_logs`, `get_log`, `watch_logs`,
+  `query_field`, `trace_logs`, `find_related_traces`, `query_sql`) now starts
+  with a one-line untrusted-data notice. **Note:** clients that split results
+  into one log entry per line will see the notice as an extra first line.
 - The MCP `query_sql` tool executes under a **database-level read-only
   guarantee** (`PRAGMA query_only` on SQLite, a read-only transaction on
   libSQL) in addition to its lexical SELECT-only checks.
