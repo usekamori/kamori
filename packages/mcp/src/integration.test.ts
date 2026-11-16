@@ -184,7 +184,7 @@ describe("flow: summarize_errors → drill-down with query_logs", () => {
     const drillText = text(drillResult);
     expect(drillText).toContain('"service":"payments"');
     expect(drillText).toContain('"level":"error"');
-    expect(drillText.split("\n")).toHaveLength(3);
+    expect(drillText.split("\n").slice(1)).toHaveLength(3);
   });
 });
 
