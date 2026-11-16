@@ -1,6 +1,6 @@
 {
   "name": "@usekamori/mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "Elastic-2.0",
   "description": "Kamori MCP server — query logs from Claude and Cursor",
   "type": "module",
@@ -26,8 +26,8 @@
     "start:stdio": "node --enable-source-maps dist/mcp.js --stdio"
   },
   "dependencies": {
-    "@usekamori/core": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.28.0",
+    "@usekamori/core": "^1.0.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

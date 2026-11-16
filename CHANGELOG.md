@@ -4,7 +4,7 @@ Notable, user-visible changes to the Kamori OSS server, MCP server, and SDKs.
 Format: [Keep a Changelog](https://keepachangelog.com); no releases have been
 cut yet, so everything lives under Unreleased.
 
-## [Unreleased]
+## [1.2.0] - 2026-11-16.
 
 ### Added
 
